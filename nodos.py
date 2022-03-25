@@ -8,6 +8,7 @@ import time
 import datetime
 import re
 from tabulate import tabulate
+import random
 
 ETH_TYPE_CUSTOM = 65467 #valor del eth custom para hellos
 TIME_OUT = 3000
@@ -75,12 +76,12 @@ class pkt_sniffer:
 
         if self.node_ID == ID_ROOT:  #Se define root
             self.node_label = [['1', '-', 'PARENT', 'Yes', '-']]
-
-        #CARGA COMPUTACIONAL
-        if self.node_ID == 2 or self.node_ID == 5:
-            self.computational_load = 1
-        if self.node_ID == 4 or self.node_ID == 7:
-            self.computational_load = -1
+            f=open(PATH+'computing_info.txt','w')
+            f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
+            f.write('------------------------------------------------------------------------------\n')
+            f.close()
+        else:
+            self.computational_load = random.randint(-10,10)
 
         if not interface_name in self.message_queues.keys():
                 self.message_queues[interface_name] = []
@@ -196,17 +197,12 @@ class pkt_sniffer:
                 sign=1
 
             sign_hex = [hex(int(sign) & 0xff)]
-            #print('Sign hex %s' % sign_hex)
             pkt += struct.pack("!1B", int(bytes(sign_hex[0],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
-
             value = [hex(int(abs(self.computational_load)) & 0xff)]
-            #print('Value %s' % value)
             pkt += struct.pack("!1B", int(bytes(value[0],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
-
             pkt += struct.pack("!47x")
-            #print(pkt)
-            self.send_pkt(pkt)
 
+            self.send_pkt(pkt)
 
 ###############################################################################################################################################################################################
     def write_on_file(self,line):
@@ -216,6 +212,12 @@ class pkt_sniffer:
             f.close()
         else:
             print(line)
+
+###############################################################################################################################################################################################
+    def write_computing_info(self, node_type,camino_principal, power, value):
+        f=open(PATH+'computing_info.txt','a')
+        f.write("{:<10} {:<10} {:<10} {:<15} {:<15} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load-value, str(self.trees_table[camino_principal][3]), str(power), self.computational_load))
+        f.close()
 
 ###############################################################################################################################################################################################
     def send_pkt(self, pkt): #Enviar el pkt
@@ -350,25 +352,33 @@ class pkt_sniffer:
                     time.sleep(5)
                     self.write_on_file('[INFO] Paquete de carga mandado')
                     self.pkt_creation(3)
+                    #self.write_computing_info([(self.interface_name,'Node type','Node load','Children','Children load', 'Final balance')])
                     #self.computational_load = 0 #Ya se ha mandado la carga
+                    self.write_computing_info('EDGE',camino_principal,[], 0)
                     self.flag_init_load = False
                     #return
                 elif (self.node_label[camino_principal][2] == 'PARENT' and self.trees_table[camino_principal][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
                     flags=[]
+                    power=[]
                     value=0
                     for entry in self.sons_info:
                         if entry[1]:
                             flags.append(entry[1])
+                        power.append(entry[2])
                         value+=entry[2]
 
                     if len(self.sons_info) == len(flags):
+                        #self.write_computing_info('PARENT',camino_principal,power, value)
                         self.computational_load += value
                         self.write_on_file('[INFO] Actualizado valor de carga %d' % self.computational_load)
                         if self.node_ID != ID_ROOT:   #El ROOT no comparte, solo actualiza su valor
                             self.pkt_creation(3)
                             self.write_on_file('[INFO] Paquete de carga enviado con %d' %self.computational_load)
+                            self.write_computing_info('PARENT',camino_principal,power, value)
+                            #self.write_computing_info([('Node name','Node type','Node load','Children','Children load', 'Final balance')])
                             #self.computational_load = 0 #Ya se ha mandado la carga
                         else:
+                            self.write_computing_info('ROOT',camino_principal,power, value)
                             self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
                             self.write_on_file('[INFO] ---        Balance total: %d        ---' %self.computational_load)
                         self.flag_init_load = False
