@@ -15,7 +15,7 @@ TIME_OUT = 3000
 NODE_NO_SDN = 2 #id del dispositivo switch no sdn
 TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
-TIME_INIT_PROPAGATION = 20
+TIME_INIT_PROPAGATION = 10
 TIME_DEDENNE = 4 #segundos
 TIME_ACTIVE_LABEL = 12 #segundos
 MAX_DEDENNE_LABELS = 10 #etiquetas dedenne max por nodo
@@ -56,6 +56,8 @@ class pkt_sniffer:
         self.computational_load = 0
         self.flag_init_load = False
         self.sons_info = []
+        self.epoch = 0
+        self.time_stamp = 0
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -110,7 +112,7 @@ class pkt_sniffer:
 
 
 ###############################################################################################################################################################################################
-    def pkt_creation(self, option, label=[]):
+    def pkt_creation(self, option, label=[], timestamp=0):
         eth_header = {}
         eth_header["mac_src"] = self.node_mac.split(":")
         eth_header["mac_dst"] = MAC_DST.split(":")
@@ -145,6 +147,17 @@ class pkt_sniffer:
 
         if option == 2:
             pkt = cabecera
+
+            if self.node_ID == ID_ROOT:
+                self.time_stamp = round(time.time() * 1000000) #timestamp en us
+                self.epoch += 1
+
+            timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
+            pkt += struct.pack("!8B",
+                    int(bytes(timestamp_hex[0],'utf-8'),16), int(bytes(timestamp_hex[1],'utf-8'),16), int(bytes(timestamp_hex[2],'utf-8'),16),
+                    int(bytes(timestamp_hex[3],'utf-8'),16), int(bytes(timestamp_hex[4],'utf-8'),16), int(bytes(timestamp_hex[5],'utf-8'),16),
+                    int(bytes(timestamp_hex[6],'utf-8'),16), int(bytes(timestamp_hex[7],'utf-8'),16))
+
             id_label=label[0].split('.')
             n_id_label=len(id_label)
 
@@ -179,7 +192,7 @@ class pkt_sniffer:
                             int(bytes(id_neigh[0],'utf-8'),16))
 
             # + [PADDING]
-            n_bytes=16+int(n_label,16)+1+7*len(self.info_neighbours)
+            n_bytes=16+int(n_label,16)+8+1+7*len(self.info_neighbours)
             padd_by=64-n_bytes
             if padd_by > 0:
                 pkt += struct.pack("!%dx" % padd_by)
@@ -216,7 +229,7 @@ class pkt_sniffer:
 ###############################################################################################################################################################################################
     def write_computing_info(self, node_type,camino_principal, power, value):
         f=open(PATH+'computing_info.txt','a')
-        f.write("{:<10} {:<10} {:<10} {:<15} {:<15} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load-value, str(self.trees_table[camino_principal][3]), str(power), self.computational_load))
+        f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load-value, str(self.trees_table[camino_principal][3]), str(power), self.computational_load))
         f.close()
 
 ###############################################################################################################################################################################################
@@ -289,7 +302,9 @@ class pkt_sniffer:
             self.cnt +=1
             if self.cnt == TIME_INIT_PROPAGATION: #COMPROBACIÓN INICIO PROPAGACIÓN DE ETIQUETAS
                 self.flag_init_propagation = True
-            if self.cnt == TIME_INIT_LOAD:  #COMPROBACIÓN INICIO BALANCEO DE CARGA
+
+            #print('Epoca: %d' % self.epoch)
+            if self.epoch == 4 and not self.flag_init_load:  #COMPROBACIÓN INICIO BALANCEO DE CARGA
                 self.write_on_file('[INFO] Iniciado proceso balance de carga de computación')
                 self.write_on_file('[INFO] Valor de carga computacional %d' %self.computational_load)
                 self.flag_init_load = True
@@ -415,10 +430,20 @@ class pkt_sniffer:
     def process_propagation_pkt(self, data, pkt):
         data_rec = {}
         data_rec["option"] = int(data[2])
-        data_rec["long_HLMAC"] = int(data[3])
+        data_rec["long_HLMAC"] = int(data[11])
         long_HLMAC = data_rec["long_HLMAC"]
 
-        data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[16:(16+long_HLMAC)+1])
+        timestamp_rcv = [hex(data[x]) for x in range(3,12)] #Obtenicion time stamp
+        for i in range(1,8):
+            timestamp_rcv[i]=timestamp_rcv[i].replace('0x', '')
+        time_stamp_conv=timestamp_rcv[0] + timestamp_rcv[1] +timestamp_rcv[2]+timestamp_rcv[3]+timestamp_rcv[4]+timestamp_rcv[5]+timestamp_rcv[6]+timestamp_rcv[7]
+        time_stamp_conv=int(time_stamp_conv,16)
+
+        if time_stamp_conv != self.time_stamp:
+            self.time_stamp=time_stamp_conv
+            self.epoch += 1
+
+        data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[24:(24+long_HLMAC)+1])
         label_new=''
         for i in range(long_HLMAC):
             label_new+='%s.' % data[i]
@@ -426,7 +451,7 @@ class pkt_sniffer:
         flag_main_tree=data[long_HLMAC]
         long_HLMAC+=1
 
-        data = struct.unpack("!7B", pkt[(16+long_HLMAC):(16+long_HLMAC+7)])
+        data = struct.unpack("!7B", pkt[(24+long_HLMAC):(24+long_HLMAC+7)])
         mac_rcv = data[0:6]
         mac_rcv='%s:%s:%s:%s:%s:%s' % (format(mac_rcv[0], '02x'),format(mac_rcv[1], '02x'),format(mac_rcv[2], '02x'),format(mac_rcv[3], '02x'),format(mac_rcv[4], '02x'),format(mac_rcv[5], '02x'))
         ind=1
@@ -434,7 +459,7 @@ class pkt_sniffer:
             try:
                 if mac_rcv == '00:00:00:00:00:00':
                     break
-                data = struct.unpack("!7B", pkt[(16+long_HLMAC+7*ind):(16+long_HLMAC+7*ind+7)])
+                data = struct.unpack("!7B", pkt[(24+long_HLMAC+7*ind):(24+long_HLMAC+7*ind+7)])
                 mac_rcv = data[0:6]
                 mac_rcv='%s:%s:%s:%s:%s:%s' % (format(mac_rcv[0], '02x'),format(mac_rcv[1], '02x'),format(mac_rcv[2], '02x'),format(mac_rcv[3], '02x'),format(mac_rcv[4], '02x'),format(mac_rcv[5], '02x'))
                 ind+=1
@@ -646,7 +671,7 @@ class pkt_sniffer:
                             self.process_hello_pkt(data)
 
                         if option == 2:   #DEDENNE
-                            data = struct.unpack("!2B1B1B", pkt[12:16])
+                            data = struct.unpack("!2B1B8B1B", pkt[12:24])
                             self.process_propagation_pkt(data, pkt)
                         if option == 3:
                             #print('Recibido paquete de carga')
@@ -694,7 +719,7 @@ if pkt_sniff.get_node_ID() == ID_ROOT:
     t_dedenne.daemon = True
     t_dedenne.start()
 
-t_load=threading.Thread(target=pkt_sniff.comput_load_sharing)   #Comprobación caducidad tabla vecinos cada 1s
+t_load=threading.Thread(target=pkt_sniff.comput_load_sharing)   #Proceso compartición carga iniciado por EDGEs
 t_load.daemon = True
 t_load.start()
 
