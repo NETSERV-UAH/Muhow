@@ -9,9 +9,10 @@ import datetime
 import re
 from tabulate import tabulate
 import random
+import os
 
 ETH_TYPE_CUSTOM = 65467 #valor del eth custom para hellos
-TIME_OUT = 3000
+TIME_OUT = 1000
 NODE_NO_SDN = 2 #id del dispositivo switch no sdn
 TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
@@ -27,7 +28,7 @@ MAC_DST = 'FF:FF:FF:FF:FF:FF'
 ID_ROOT = 1
 FLAG_FILE = False
 PATH = './Logs/'
-TIME_INIT_LOAD = 60
+TIME_INIT_LOAD = 30
 
 ###############################################################################################################################################################################################
 def handler(signum, frame):  #Kill all threads
@@ -43,21 +44,24 @@ class pkt_sniffer:
         self.inputs = []
         self.outputs = []
         self.message_queues = dict()
-        self.info_neighbours = []
-        self.node_label = []
+        self.info_neighbours = []   #HELLO FRAMES
+        self.node_label = []        #HLMAC FRAMES
         self.node_ID = 0
         self.hello_packet = 0
         self.label_propagation_packet = 0
         self.cnt = 0
         self.flag_init_propagation = False
-        self.cnt_neighbours = list(range(1,26))    #ID para 25 posibles vecinos por nodo
-        self.trees_table = []
+        self.cnt_neighbours = list(range(1,26))    #ID para 25 posibles vecinos por nodo   (HELLO FRAMES)
+        self.trees_table = []   #HLMAC FRAMES
         self.log_file = ''
         self.computational_load = 0
         self.flag_init_load = False
-        self.sons_info = []
-        self.epoch = 0
+        self.sons_info = []    #LOAD FRAMES
+        self.iteration = 0
         self.time_stamp = 0
+        self.main_labels = []
+        self.long_ant = 0
+        self.value_ant = 0
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -78,10 +82,11 @@ class pkt_sniffer:
 
         if self.node_ID == ID_ROOT:  #Se define root
             self.node_label = [['1', '-', 'PARENT', 'Yes', '-']]
-            f=open(PATH+'computing_info.txt','w')
-            f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
-            f.write('------------------------------------------------------------------------------\n')
-            f.close()
+            os.system('rm -f ./Logs/*')
+            #f=open(PATH+'computing_info.txt','w')
+            #f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
+            #f.write('------------------------------------------------------------------------------\n')
+            #f.close()
         else:
             self.computational_load = random.randint(-10,10)
 
@@ -112,7 +117,7 @@ class pkt_sniffer:
 
 
 ###############################################################################################################################################################################################
-    def pkt_creation(self, option, label=[], timestamp=0):
+    def pkt_creation(self, option, label=[], timestamp=0,valor=0):
         eth_header = {}
         eth_header["mac_src"] = self.node_mac.split(":")
         eth_header["mac_dst"] = MAC_DST.split(":")
@@ -150,9 +155,20 @@ class pkt_sniffer:
 
             if self.node_ID == ID_ROOT:
                 self.time_stamp = round(time.time() * 1000000) #timestamp en us
-                self.epoch += 1
+                #print('Time stamp root: %d' %self.time_stamp )
+                self.write_on_file('\n---------------------------------------------------------')
+                self.write_on_file('---   Nueva iteración desde root: %d    ---' % self.iteration)
+                self.write_on_file('---------------------------------------------------------')
+
+                #now = datetime.datetime.now()
+                #print ("Fin envio paquete de carga : ")
+                #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+                self.trees_table=[]
+                self.sons_info=[]
+                self.iteration += 1
 
             timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
+            #print('Hex time_stamp: ' + str(timestamp_hex))
             pkt += struct.pack("!8B",
                     int(bytes(timestamp_hex[0],'utf-8'),16), int(bytes(timestamp_hex[1],'utf-8'),16), int(bytes(timestamp_hex[2],'utf-8'),16),
                     int(bytes(timestamp_hex[3],'utf-8'),16), int(bytes(timestamp_hex[4],'utf-8'),16), int(bytes(timestamp_hex[5],'utf-8'),16),
@@ -202,20 +218,21 @@ class pkt_sniffer:
             if self.node_ID != ID_ROOT:
                 self.send_pkt(self.label_propagation_packet)
 
-        if option == 3:     #COMPUTATIONAL LOAD SHARING FROM EDGES
+        if option == 3:     #COMPUTATIONAL LOAD SHARING FROM LEAFS
             pkt = cabecera
-            if self.computational_load >= 0: #POSITIVO = 0
+            if (self.computational_load+valor) >= 0: #POSITIVO = 0
                 sign=0
             else:   #NEGATIVO = 1
                 sign=1
 
             sign_hex = [hex(int(sign) & 0xff)]
             pkt += struct.pack("!1B", int(bytes(sign_hex[0],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
-            value = [hex(int(abs(self.computational_load)) & 0xff)]
+            value = [hex(int(abs(self.computational_load+valor)) & 0xff)]
             pkt += struct.pack("!1B", int(bytes(value[0],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
             pkt += struct.pack("!47x")
 
             self.send_pkt(pkt)
+            self.write_on_file('[INFO] Paquete de carga enviado con %d' % (self.computational_load+valor))
 
 ###############################################################################################################################################################################################
     def write_on_file(self,line):
@@ -228,8 +245,8 @@ class pkt_sniffer:
 
 ###############################################################################################################################################################################################
     def write_computing_info(self, node_type,camino_principal, power, value):
-        f=open(PATH+'computing_info.txt','a')
-        f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load-value, str(self.trees_table[camino_principal][3]), str(power), self.computational_load))
+        f=open(PATH+'computing_info_it_%d.txt' % (self.iteration-1),'a')
+        f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load, str(self.trees_table[camino_principal][3]), str(power), self.computational_load+value))
         f.close()
 
 ###############################################################################################################################################################################################
@@ -260,7 +277,7 @@ class pkt_sniffer:
                 self.write_on_file('[INFO] Reglas aplicadas: máximo %d etiquetas\n' % (MAX_DEDENNE_LABELS))
             else:
                 self.write_on_file('[INFO] Reglas aplicadas: máximo %d etiquetas con prefijo de %d dígitos\n' % (MAX_DEDENNE_LABELS,DIGITOS_PREFIJO))
-            self.write_on_file(tabulate(self.node_label, headers=['HLMAC', 'Prev. hop ID', 'Node Type', 'Main Tree', 'TTL'], tablefmt='fancy_grid', stralign='center'))
+            self.write_on_file(tabulate(self.node_label, headers=['HLMAC', 'Prev. hop ID', 'Node Type', 'Main Tree', 'TTL', 'Parent MAC'], tablefmt='fancy_grid', stralign='center'))
 
 ###############################################################################################################################################################################################
     def print_trees_table(self):
@@ -273,6 +290,7 @@ class pkt_sniffer:
             self.write_on_file(tabulate(self.sons_info, headers=['Son ID', 'Rcv load', 'Value'], tablefmt='fancy_grid', stralign='center'))
 
 ###############################################################################################################################################################################################
+    '''
     def expiration_time(self):
         while(1):
             if self.info_neighbours:
@@ -286,7 +304,7 @@ class pkt_sniffer:
                                 if entry[1] in self.trees_table[j][3]:
                                     if len(self.trees_table[j][3]) == 1:
                                         self.trees_table[j][3] = []
-                                        self.trees_table[j][2] = 'EDGE'
+                                        self.trees_table[j][2] = 'LEAF'
                                     else:
                                         self.trees_table[j][3].remove(entry[1])
                             self.print_trees_table()
@@ -303,11 +321,11 @@ class pkt_sniffer:
             if self.cnt == TIME_INIT_PROPAGATION: #COMPROBACIÓN INICIO PROPAGACIÓN DE ETIQUETAS
                 self.flag_init_propagation = True
 
-            #print('Epoca: %d' % self.epoch)
-            if self.epoch == 4 and not self.flag_init_load:  #COMPROBACIÓN INICIO BALANCEO DE CARGA
-                self.write_on_file('[INFO] Iniciado proceso balance de carga de computación')
-                self.write_on_file('[INFO] Valor de carga computacional %d' %self.computational_load)
-                self.flag_init_load = True
+            #print('Epoca: %d' % self.iteration)
+            #if self.iteration == 4 and not self.flag_init_load:  #COMPROBACIÓN INICIO BALANCEO DE CARGA
+                #self.write_on_file('[INFO] Iniciado proceso balance de carga de computación')
+                #self.write_on_file('[INFO] Valor de carga computacional %d' %self.computational_load)
+                #self.flag_init_load = True
 
             if self.node_label and self.node_label[0][0] != '1':  #COMPROBACIÓN TTL ETIQUETA
                 for label in self.node_label:
@@ -336,69 +354,77 @@ class pkt_sniffer:
                                 label[2] = 'PARENT'
                                 break
                         if not flag_padre:
-                            label[2] = 'EDGE'
+                            label[2] = 'LEAF'
 
-            if self.trees_table:   #COMPROBACIÓN ELIMINACIÓN ENTRADAS REPETIDAS EN TABLA DE ÁRBOLES SI SON EDGE (Posible duplicado árbol principal al ser edge)
+            if self.trees_table:   #COMPROBACIÓN ELIMINACIÓN ENTRADAS REPETIDAS EN TABLA DE ÁRBOLES SI SON LEAF (Posible duplicado árbol principal al ser LEAF)
                 for label in self.node_label:
                     same_label=[]
                     for tree in self.trees_table:
                         if tree[0] == label[0]:
                             same_label.append(tree)
                     if len(same_label) == 2:
-                        if (same_label[0][2] == 'EDGE' and same_label[1][2] == 'EDGE') or same_label[1][2] == 'EDGE':
+                        if (same_label[0][2] == 'LEAF' and same_label[1][2] == 'LEAF') or same_label[1][2] == 'LEAF':
                             self.trees_table.remove(same_label[1])
 
             time.sleep(1)
-
+    '''
 ###############################################################################################################################################################################################
     def comput_load_sharing(self):
-        while 1:
-            if self.flag_init_load:
-                #CAMINO SELECCIONADO (Ahora mismo CAMINO PRINCIPAL)
-                camino_principal = 0
-                #if self.node_ID != ID_ROOT:
-                if self.trees_table[camino_principal][3] != [] and self.sons_info == []:  #CREACION DE TABLA DE HIJOS PARA CONTROLAR EL PASO
-                    for hijo in self.trees_table[0][3]:
-                        self.sons_info.append([hijo, False, 0])
-                    self.write_on_file('[INFO] Información de hijos del camino principal')
-                    self.print_sons_table()
+        #while 1:
+            #if self.flag_init_load:
 
-                elif (self.node_label[camino_principal][2] == 'EDGE' or self.trees_table[camino_principal][2] == 'EDGE'):  #PROPAGACIÓN CARGA SOLO PARA EDGES
-                    time.sleep(5)
-                    self.write_on_file('[INFO] Paquete de carga mandado')
+        self.write_on_file('[INFO] Iniciado proceso balance de carga de computación')
+        self.write_on_file('[INFO] Valor de carga computacional LEAF %d' %self.computational_load)
+        #CAMINO SELECCIONADO (Ahora mismo CAMINO PRINCIPAL)
+        camino_principal = 0
+
+        #if (self.node_label[camino_principal][2] == 'LEAF' or self.trees_table[camino_principal][2] == 'LEAF') and self.flag_init_load:
+        #time.sleep(5)
+        #self.write_on_file('[INFO] Paquete de carga enviado')
+        self.pkt_creation(3)
+        #now = datetime.datetime.now()
+        #print ("Fin envio paquete de carga : ")
+        #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+        #self.write_computing_info([(self.interface_name,'Node type','Node load','Children','Children load', 'Final balance')])
+        #self.computational_load = 0 #Ya se ha mandado la carga
+        self.write_computing_info('LEAF',camino_principal,[], 0)
+        #self.flag_init_load = False
+
+        #self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
+        #self.write_on_file('[INFO] Nuevo carga computacional %d' %self.computational_load)
+
+        return
+        '''
+        elif (self.node_label[camino_principal][2] == 'PARENT' and self.trees_table[camino_principal][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
+            flags=[]
+            power=[]
+            value=0
+            for entry in self.sons_info:
+                if entry[1]:
+                    flags.append(entry[1])
+                power.append(entry[2])
+                value+=entry[2]
+
+            if len(self.sons_info) == len(flags):
+                #self.write_computing_info('PARENT',camino_principal,power, value)
+                self.computational_load += value
+                self.write_on_file('[INFO] Actualizado valor de carga %d' % self.computational_load)
+                if self.node_ID != ID_ROOT:   #El ROOT no comparte, solo actualiza su valor
                     self.pkt_creation(3)
-                    #self.write_computing_info([(self.interface_name,'Node type','Node load','Children','Children load', 'Final balance')])
+                    self.write_on_file('[INFO] Paquete de carga enviado con %d' %self.computational_load)
+                    self.write_computing_info('PARENT',camino_principal,power, value)
+                    #self.write_computing_info([('Node name','Node type','Node load','Children','Children load', 'Final balance')])
                     #self.computational_load = 0 #Ya se ha mandado la carga
-                    self.write_computing_info('EDGE',camino_principal,[], 0)
-                    self.flag_init_load = False
-                    #return
-                elif (self.node_label[camino_principal][2] == 'PARENT' and self.trees_table[camino_principal][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
-                    flags=[]
-                    power=[]
-                    value=0
-                    for entry in self.sons_info:
-                        if entry[1]:
-                            flags.append(entry[1])
-                        power.append(entry[2])
-                        value+=entry[2]
 
-                    if len(self.sons_info) == len(flags):
-                        #self.write_computing_info('PARENT',camino_principal,power, value)
-                        self.computational_load += value
-                        self.write_on_file('[INFO] Actualizado valor de carga %d' % self.computational_load)
-                        if self.node_ID != ID_ROOT:   #El ROOT no comparte, solo actualiza su valor
-                            self.pkt_creation(3)
-                            self.write_on_file('[INFO] Paquete de carga enviado con %d' %self.computational_load)
-                            self.write_computing_info('PARENT',camino_principal,power, value)
-                            #self.write_computing_info([('Node name','Node type','Node load','Children','Children load', 'Final balance')])
-                            #self.computational_load = 0 #Ya se ha mandado la carga
-                        else:
-                            self.write_computing_info('ROOT',camino_principal,power, value)
-                            self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
-                            self.write_on_file('[INFO] ---        Balance total: %d        ---' %self.computational_load)
-                        self.flag_init_load = False
+                    self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
 
-
+                else:
+                    self.write_computing_info('ROOT',camino_principal,power, value)
+                    self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
+                    self.write_on_file('[INFO] ---        Balance total: %d        ---' %self.computational_load)
+                #self.flag_init_load = False
+                return
+            '''
 ###############################################################################################################################################################################################
     def process_hello_pkt(self, data):
         mac = [hex(int(data[x])) for x in range(0,6)]
@@ -433,15 +459,39 @@ class pkt_sniffer:
         data_rec["long_HLMAC"] = int(data[11])
         long_HLMAC = data_rec["long_HLMAC"]
 
-        timestamp_rcv = [hex(data[x]) for x in range(3,12)] #Obtenicion time stamp
-        for i in range(1,8):
-            timestamp_rcv[i]=timestamp_rcv[i].replace('0x', '')
-        time_stamp_conv=timestamp_rcv[0] + timestamp_rcv[1] +timestamp_rcv[2]+timestamp_rcv[3]+timestamp_rcv[4]+timestamp_rcv[5]+timestamp_rcv[6]+timestamp_rcv[7]
-        time_stamp_conv=int(time_stamp_conv,16)
+        timestamp_rcv = struct.unpack("!8B", pkt[15:23])
+        #timestamp_rcv = [hex(pkt[x]) for x in range(15,23)] #Obtenicion time stamp
+        #print('Hex time_stamp rcv: ' + str(timestamp_rcv))
+        #for i in range(0,8):
+        #    timestamp_rcv[i]=timestamp_rcv[i].replace('0x', '')
+        time_stamp_rcv='0x%s%s%s%s%s%s%s%s' % (format(timestamp_rcv[0], '02x'),format(timestamp_rcv[1], '02x'),format(timestamp_rcv[2], '02x'),format(timestamp_rcv[3], '02x'),format(timestamp_rcv[4], '02x'),format(timestamp_rcv[5], '02x'),format(timestamp_rcv[6], '02x'),format(timestamp_rcv[7], '02x'))
+        #time_stamp_rcv=timestamp_rcv[0] + timestamp_rcv[1] +timestamp_rcv[2]+timestamp_rcv[3]+timestamp_rcv[4]+timestamp_rcv[5]+timestamp_rcv[6]+timestamp_rcv[7]
+        #print(time_stamp_rcv)
+        time_stamp_rcv=int(time_stamp_rcv,16)
 
-        if time_stamp_conv != self.time_stamp:
-            self.time_stamp=time_stamp_conv
-            self.epoch += 1
+        #print('time_stamp almacenado %d ' %self.time_stamp)
+        #print('time_stamp recibido %d ' % time_stamp_rcv)
+        if time_stamp_rcv < self.time_stamp:      #OLD ITERATION
+            return
+        elif time_stamp_rcv > self.time_stamp: #NEW ITERATION
+            #BORRO TODA LA INFO Y ACTUALIZO EL TIME STAMP
+            self.time_stamp = time_stamp_rcv
+            self.node_label = []
+            self.trees_table = []
+            self.sons_info = []
+            self.main_labels = []
+            self.flag_init_load = False
+            self.computational_load = random.randint(-10,10) #Nuevo valor de carga para la iteración
+            self.write_on_file('\n---------------------------------------------------------')
+            self.write_on_file('---    Nueva iteración: %d    ---' %self.iteration)
+            self.write_on_file('---------------------------------------------------------')
+
+            f=open(PATH+'computing_info_it_%d.txt' % self.iteration,'w')
+            f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
+            f.write('-----------------------------------------------------------------------------------------\n')
+            f.close()
+            self.iteration += 1
+
 
         data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[24:(24+long_HLMAC)+1])
         label_new=''
@@ -466,9 +516,17 @@ class pkt_sniffer:
             except Exception as exception:
                 continue
 
-        if mac_rcv == self.node_mac:
+        if mac_rcv == self.node_mac:   #I AM IN THE NEIGHBOUR LIST
             id_node=data[6]
             label_new_2='%s%s' % (label_new,id_node)
+
+            if flag_main_tree:   #ALMACENAR ETIQUETAS DEL CAMINO PRINCIPAL PARA LUEGO DEDICIR SI LEAF
+                self.main_labels.append(label_new_2)
+                #print('main_labels: %s' % self.main_labels)
+
+            data = struct.unpack("!6B", pkt[6:12])
+            #mac_src = data[0:6]
+            mac_src='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
 
             flag_exite_dedenne = False
             if self.node_ID != ID_ROOT:
@@ -485,7 +543,7 @@ class pkt_sniffer:
                         self.pkt_creation(2,label)
                         break
 
-                    elif label[0][0:long] == label_new[0:long] and (label_new[0:long] != '1.' and label[0][0:long] != '1.'):  #Comprobación prefijo
+                    elif label[0][0:long] == label_new[0:long] and (label_new[0:long] != '1.' and label[0][0:long] != '1.'):  #Comprobación prefijo = PREFIX
                         flag_exite_dedenne = True
 
                         if label_new_2[0:len(label_new_2)-4] == label: #Si coincide prefijo, NODO HERMANO, no hago nada (NO INTERESA)
@@ -500,7 +558,7 @@ class pkt_sniffer:
                                         flag_tree=True
                                         break
                             if not flag_tree or self.trees_table == []:
-                                self.trees_table.append([label[0], 'MAIN','EDGE',[]])
+                                self.trees_table.append([label[0], 'MAIN','UNDEFINED',[]])
 
                             ### COMPROBACIÓN TIPO DE NODO ###
                             #Si coincide el prefijo quitando los dos primeros dígitos => NODO HERMANO
@@ -518,12 +576,15 @@ class pkt_sniffer:
                                         if not (id_hijo in entry[3]):
                                             entry[3].append(id_hijo)
                                             self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
-                                            self.print_trees_table()
+                                            #self.print_trees_table()
+
+                                            self.sons_info.append([id_hijo, False, 0])
+                                             #self.print_sons_table()
 
                                         if label[2] != 'PARENT':
                                             label[2] = 'PARENT'
-                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
-                                            self.print_labels()
+                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
+                                            #self.print_labels()
                                         break
 
                         ### ÁRBOLES SECUNDARIOS ###
@@ -535,7 +596,7 @@ class pkt_sniffer:
                                         flag_tree=True
                                         break
                             if not flag_tree or self.trees_table == []:
-                                self.trees_table.append([label[0], '-','EDGE',[]])
+                                self.trees_table.append([label[0], '-','UNDEFINED',[]])
 
                             ### COMPROBACIÓN TIPO DE NODO ###
                             #Si coincide el prefijo quitando los dos primeros dígitos => NODO HERMANO
@@ -552,23 +613,23 @@ class pkt_sniffer:
                                         id_hijo=int(label_new[len(label_new)-2])
                                         if not (id_hijo in entry[3]):
                                             entry[3].append(id_hijo)
-                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
-                                            self.print_trees_table()
+                                            #self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
+                                            #self.print_trees_table()
                                         if label[2] != 'PARENT':
                                             label[2] = 'PARENT'
-                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
-                                            self.print_labels()
+                                            #self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
+                                            #self.print_labels()
                                         break
 
                     elif FLAG_PREFIJO:
                         if label[0][0:(2*DIGITOS_PREFIJO)-1] == label_new_2[0:(2*DIGITOS_PREFIJO)-1]:
                             flag_exite_dedenne = True
                             break
-
                     if flag_exite_dedenne:
                         break
 
-                if not flag_exite_dedenne:  #No tengo la etiqueta, la guardo
+
+                if not flag_exite_dedenne:  #No tengo la etiqueta, la guardo = NEW PREFIX
                     if self.node_label == []:
                         principal='Yes'
                     else:
@@ -578,31 +639,63 @@ class pkt_sniffer:
                         if self.get_previous_hop(pkt) == 0:  #Hasta que no conozca al vecino, no añado su etiqueta
                             return
 
-                        self.node_label.append([label_new_2, self.get_previous_hop(pkt),'EDGE', principal,TIME_ACTIVE_LABEL])
-                        self.write_on_file('[INFO] New Dedenne Label: %s' % label_new_2)
-                        self.print_labels()
+                        self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal,TIME_ACTIVE_LABEL, mac_src])
+                        #self.write_on_file('[INFO] New Dedenne Label: %s' % label_new_2)
+                        #self.print_labels()
 
                         #Actualizar tabla de árboles
                         if principal == 'Yes':
-                            self.trees_table.append([label_new_2, 'MAIN','EDGE',[]])
+                            self.trees_table.append([label_new_2, 'MAIN','UNDEFINED',[]])
                         else:
-                            self.trees_table.append([label_new_2, '-','EDGE',[]])
-                        self.write_on_file('[INFO] Nueva entrada añadida: %s' % label_new_2)
-                        self.print_trees_table()
+                            self.trees_table.append([label_new_2, '-','UNDEFINED',[]])
+                        self.write_on_file('[INFO] Nueva HLMAC añadida: %s' % label_new_2)
+                        #self.print_trees_table()
                         #GENERO MENSAJE Y LO ENVÍO CON label_new_2
                         for label in self.node_label:
                             if label[0] == label_new_2:
                                 self.pkt_creation(2,label)
-
+                            #now = datetime.datetime.now()
+                            #print ("Envío mensaje de etiqueta : ")
+                            #print (now.strftime("%Y-%m-%d %H:%M:%S"))
 
                 if flag_exite_dedenne and self.trees_table == []:
-                    self.trees_table.append([self.node_label[0][0], 'MAIN','EDGE',[]])
+                    self.trees_table.append([self.node_label[0][0], 'MAIN','UNDEFINED',[]])
                     self.write_on_file('[INFO] Nueva entrada añadida: %s' % label_new_2)
+                    #self.print_trees_table()
+
+                #print('ETIQUETAS RECIBIDAS DEL ARBOL PRINCIPAL %s ' % self.main_labels)
+                #print('TIPO NODO ARBOL PRINCIPAL %s' % self.node_label[0][2])
+                #print('FLAG INIT LOAD ' + str(self.flag_init_load))
+                #self.print_labels()
+                #self.print_trees_table()
+                if len(self.info_neighbours) == 1 and mac_src == self.info_neighbours[0][0] and not self.flag_init_load:    #ONLY ONE NEIGHBOUR?
+                    self.trees_table[0][2] = 'LEAF'
+                    self.node_label[0][2] = 'LEAF'
+                    self.write_on_file('[INFO] Solo tengo un vecino y él me ha pasado la etiqueta: LEAF')
+                    self.print_labels()
                     self.print_trees_table()
+                    self.flag_init_load = True
+                    self.comput_load_sharing()
+
+                elif (len(self.main_labels) == len(self.info_neighbours)) and self.trees_table[0][2] == 'UNDEFINED' and not self.flag_init_load:  #MORE THAN 1 NEIGHBOUR: CHECK INFO
+                    #print(self.main_labels)
+                    self.write_on_file('[INFO] Tengo toda la información de mis vecinos y no soy padre: LEAF')
+                    #print(self.main_labels)
+                    self.trees_table[0][2] = 'LEAF'
+                    self.node_label[0][2] = 'LEAF'
+                    self.print_labels()
+                    self.print_trees_table()
+                    self.flag_init_load = True
+                    self.comput_load_sharing()
+
+                #else:    #LOAD TIMER ENABLE
+                #    self.load_thread=threading.Thread(target=self.wait_labels)  #Envio hello pkt cada 5s
+                    #t_hello.daemon = True
+                #    t_hello.start()
 
             else:   #PARA NODO ROOT: Tabla de árboles con hijos
                 if self.trees_table == []:
-                    self.trees_table.append(['1','MAIN','EDGE',[]])
+                    self.trees_table.append(['1','MAIN','LEAF',[]])
 
                 if label_new_2[0:len(label_new_2)-4] == '1':
                     data = struct.unpack("!6B", pkt[6:12])
@@ -613,39 +706,90 @@ class pkt_sniffer:
                                 self.trees_table[0][2] = 'PARENT'
                                 self.trees_table[0][3].append(neigh[1])
                                 self.print_trees_table()
+                                self.sons_info.append([neigh[1], False, 0])
+                                #self.print_sons_table()
+
 
 ###############################################################################################################################################################################################
     def process_load_pkt(self, data, pkt):
         orig = struct.unpack("!6B", pkt[6:12])
         mac_rcv='%s:%s:%s:%s:%s:%s' % (format(orig[0], '02x'),format(orig[1], '02x'),format(orig[2], '02x'),format(orig[3], '02x'),format(orig[4], '02x'),format(orig[5], '02x'))
-        #print(mac_rcv)
         for neigh in self.info_neighbours:
             if neigh[0] == mac_rcv:
                 if neigh[1] in self.trees_table[0][3]:
-                    sign=int(data[0])   #+=0 / -=1
+                    sign=int(data[0])   #(+)=0 / (-)=1
                     value=int(data[1])
                     if sign:
                         value=-value
-                    #self.write_on_file('[INFO] Recibido paquete de hijo con ID %d con carga %d' %(neigh[1],value))
-                    #break
+
                     for son in self.sons_info:
                         if son[0] == neigh[1]:
                             son[1] = True
                             son[2] = value
                             self.print_sons_table()
-                            return
+                            break
+
+        camino_principal=0
+        #print(self.node_label)
+        #print(self.trees_table)
+        if (self.node_label[camino_principal][2] == 'PARENT' and self.trees_table[camino_principal][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
+            flags=[]
+            power=[]
+            value=0
+            for entry in self.sons_info:
+                if entry[1]:
+                    flags.append(entry[1])
+                power.append(entry[2])
+                value+=entry[2]   #CALCULATE GENERAL LOAD
+
+            if len(self.sons_info) == len(flags):
+                #self.computational_load += value
+                if self.long_ant < len(self.sons_info) or self.value_ant != value:
+                    self.long_ant = len(self.sons_info)
+                    self.value_ant = value
+                    #self.print_sons_table()
+                    if self.node_ID != ID_ROOT:   #El ROOT no comparte, solo actualiza su valor
+                        self.print_labels()
+                        self.print_trees_table()
+                        #if self.long_ant < len(self.sons_info):
+                            #self.long_ant = len(self.sons_info)
+                        self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
+                        self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
+                        self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
+                        #self.write_on_file('[INFO] Paquete de carga enviado')
+                        self.write_computing_info('PARENT',camino_principal,power, value)
+                        #self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
+                        #self.write_on_file('[INFO] Nuevo valor de carga %d' % self.computational_load)
+                        #now = datetime.datetime.now()
+                        #print ("Fin envio paquete de carga : ")
+                        #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+                    else:
+                        self.write_computing_info('ROOT',camino_principal,power, value)
+                        self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
+                        self.write_on_file('[INFO] ---        Balance total: %d        ---' % (self.computational_load+value))
+                        #now = datetime.datetime.now()
+                        #print ("Fin procesado root : ")
+                        #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+                        self.computational_load=0
+                        #print(self.sons_info)
+                        #for son in self.sons_info:
+                        #    son[2] = 0
+                        #    son[1] = False
+            return
 
 ###############################################################################################################################################################################################
     def init_propagation(self):
+        time.sleep(TIME_INIT_PROPAGATION)
         if self.trees_table == []:
             self.trees_table.append(['1','MAIN','PARENT',[]])
         while(1):
-            if self.node_ID == ID_ROOT:  #NODO ROOT
-                if self.flag_init_propagation:
-                    self.pkt_creation(2,self.node_label[0]) #Option=1 (Dedenne)
-                    self.write_on_file('[INFO] Iniciado propagación etiquetas')
-                    self.send_pkt(self.label_propagation_packet)
-                    time.sleep(TIME_DEDENNE)
+            #if self.node_ID == ID_ROOT:  #NODO ROOT
+                #if self.flag_init_propagation:
+            self.pkt_creation(2,self.node_label[0]) #Option=1 (Dedenne)
+            #print(self.label_propagation_packet)
+            #self.write_on_file('[INFO] Iniciado propagación etiquetas')
+            self.send_pkt(self.label_propagation_packet)
+            time.sleep(TIME_DEDENNE)
 
 ###############################################################################################################################################################################################
     def recv(self):
@@ -670,10 +814,14 @@ class pkt_sniffer:
                             data = struct.unpack("!6B", pkt[15:21])  #ESTRUCTURA PKT HELLO
                             self.process_hello_pkt(data)
 
-                        if option == 2:   #DEDENNE
+                        elif option == 2:   #DEDENNE
+                            #now = datetime.datetime.now()
+                            #print ("Paquete tipo 2 recibido a : ")
+                            #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+                            #print('Hora pkt recibido ' + str())
                             data = struct.unpack("!2B1B8B1B", pkt[12:24])
                             self.process_propagation_pkt(data, pkt)
-                        if option == 3:
+                        elif option == 3:
                             #print('Recibido paquete de carga')
                             data = struct.unpack("!1B1B" , pkt[15:17])
                             self.process_load_pkt(data, pkt)
@@ -704,26 +852,26 @@ pkt_sniff.print_sniffer_info()  #Info del socket abierto
 
 #Creacion del paquete HELLO
 pkt_sniff.pkt_creation(1) #Option=1 (HELLO INICIAL PARA DESCUBRIR VECINOS)
-
-#Hilo para mensajes hello = 10seg
+# HELLO TIMER ENABLE
 t_hello=threading.Thread(target=pkt_sniff.hello_loop)  #Envio hello pkt cada 5s
 t_hello.daemon = True
 t_hello.start()
 
-t_expiration=threading.Thread(target=pkt_sniff.expiration_time)   #Comprobación caducidad tabla vecinos cada 1s
-t_expiration.daemon = True
-t_expiration.start()
+#t_expiration=threading.Thread(target=pkt_sniff.expiration_time)   #Comprobación caducidad tabla vecinos cada 1s
+#t_expiration.daemon = True
+#t_expiration.start()
 
+# HLMAC TIMER ENABLE
 if pkt_sniff.get_node_ID() == ID_ROOT:
     t_dedenne=threading.Thread(target=pkt_sniff.init_propagation)   #Hilo ejecución Dedenne
     t_dedenne.daemon = True
     t_dedenne.start()
 
-t_load=threading.Thread(target=pkt_sniff.comput_load_sharing)   #Proceso compartición carga iniciado por EDGEs
-t_load.daemon = True
-t_load.start()
+#t_load=threading.Thread(target=pkt_sniff.comput_load_sharing)   #Proceso compartición carga iniciado por LEAFs
+#t_load.daemon = True
+#t_load.start()
 
 signal.signal(signal.SIGINT, handler)
 
 #Bucle recepción mensajes
-pkt_sniff.recv()
+pkt_sniff.recv()    #MAIN PROGRAM
