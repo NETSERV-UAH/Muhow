@@ -18,7 +18,7 @@ TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
 TIME_INIT_PROPAGATION = 10
 TIME_DEDENNE = 4 #segundos
-TIME_ACTIVE_LABEL = 12 #segundos
+#TIME_ACTIVE_LABEL = 12 #segundos
 MAX_DEDENNE_LABELS = 10 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
 FLAG_LABELS_INFO = True
@@ -61,7 +61,8 @@ class pkt_sniffer:
         self.time_stamp = 0
         self.main_labels = []
         self.long_ant = 0
-        self.value_ant = 0
+        self.value_ant = None
+        self.tree_index = 0 #DE MOMENTO SOLO CAMINO PRINCIPAL
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -120,7 +121,13 @@ class pkt_sniffer:
     def pkt_creation(self, option, label=[], timestamp=0,valor=0):
         eth_header = {}
         eth_header["mac_src"] = self.node_mac.split(":")
-        eth_header["mac_dst"] = MAC_DST.split(":")
+
+        if option == 3:  #UNICAST PARA LOAD PACKAGES
+            dst=self.node_label[self.tree_index][4]
+            eth_header["mac_dst"] = dst.split(":")
+        else:   #BROADCAST PARA RESTO DE PACKAGES
+            eth_header["mac_dst"] = MAC_DST.split(":")
+
         eth_header["eth_type"] = [hex(ETH_TYPE_CUSTOM >> i & 0xff) for i in (8,0)]
 
         #ID_hex = [hex(self.node_ID & 0xff)]
@@ -158,14 +165,16 @@ class pkt_sniffer:
                 #print('Time stamp root: %d' %self.time_stamp )
                 self.write_on_file('\n---------------------------------------------------------')
                 self.write_on_file('---   Nueva iteración desde root: %d    ---' % self.iteration)
+                now = datetime.datetime.now()
+                #print ("Nueva iteración desde root : ")
+                print (now.strftime("%Y-%m-%d %H:%M:%S.%f"))
                 self.write_on_file('---------------------------------------------------------')
 
-                #now = datetime.datetime.now()
-                #print ("Fin envio paquete de carga : ")
-                #print (now.strftime("%Y-%m-%d %H:%M:%S"))
                 self.trees_table=[]
                 self.sons_info=[]
                 self.iteration += 1
+                self.long_ant = 0
+                self.value_ant = None
 
             timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
             #print('Hex time_stamp: ' + str(timestamp_hex))
@@ -199,6 +208,7 @@ class pkt_sniffer:
             header["Main_tree"] = [hex(arbol & 0xff)]
             pkt += struct.pack("!1B", int(bytes(header["Main_tree"][0],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
 
+            self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
             for neigh in self.info_neighbours:
                 mac_neigh = neigh[0].split(":")
                 id_neigh = [hex(int(neigh[1]) & 0xff)]
@@ -208,6 +218,7 @@ class pkt_sniffer:
                             int(bytes(id_neigh[0],'utf-8'),16))
 
             # + [PADDING]
+            self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
             n_bytes=16+int(n_label,16)+8+1+7*len(self.info_neighbours)
             padd_by=64-n_bytes
             if padd_by > 0:
@@ -232,7 +243,7 @@ class pkt_sniffer:
             pkt += struct.pack("!47x")
 
             self.send_pkt(pkt)
-            self.write_on_file('[INFO] Paquete de carga enviado con %d' % (self.computational_load+valor))
+            self.write_on_file('[INFO] Paquete de carga enviado con %d a MAC %s' % ((self.computational_load+valor),dst))
 
 ###############################################################################################################################################################################################
     def write_on_file(self,line):
@@ -244,9 +255,9 @@ class pkt_sniffer:
             print(line)
 
 ###############################################################################################################################################################################################
-    def write_computing_info(self, node_type,camino_principal, power, value):
+    def write_computing_info(self, node_type, power, value):
         f=open(PATH+'computing_info_it_%d.txt' % (self.iteration-1),'a')
-        f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load, str(self.trees_table[camino_principal][3]), str(power), self.computational_load+value))
+        f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load, str(self.trees_table[self.tree_index][3]), str(power), self.computational_load+value))
         f.close()
 
 ###############################################################################################################################################################################################
@@ -268,7 +279,8 @@ class pkt_sniffer:
 ###############################################################################################################################################################################################
     def print_info_neighbours(self):
         if self.info_neighbours and FLAG_HELLO_INFO:
-            self.write_on_file(tabulate(self.info_neighbours, headers=['MAC', 'ID vecino', 'TTL'], tablefmt='fancy_grid', stralign='center'))
+            self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
+            self.write_on_file(tabulate(self.info_neighbours, headers=['MAC', 'ID vecino', 't.stamp'], tablefmt='fancy_grid', stralign='center'))
 
 ###############################################################################################################################################################################################
     def print_labels(self):
@@ -277,7 +289,8 @@ class pkt_sniffer:
                 self.write_on_file('[INFO] Reglas aplicadas: máximo %d etiquetas\n' % (MAX_DEDENNE_LABELS))
             else:
                 self.write_on_file('[INFO] Reglas aplicadas: máximo %d etiquetas con prefijo de %d dígitos\n' % (MAX_DEDENNE_LABELS,DIGITOS_PREFIJO))
-            self.write_on_file(tabulate(self.node_label, headers=['HLMAC', 'Prev. hop ID', 'Node Type', 'Main Tree', 'TTL', 'Parent MAC'], tablefmt='fancy_grid', stralign='center'))
+            #self.write_on_file(tabulate(self.node_label, headers=['HLMAC', 'Prev. hop ID', 'Node Type', 'Main Tree', 'TTL', 'Parent MAC'], tablefmt='fancy_grid', stralign='center'))
+            self.write_on_file(tabulate(self.node_label, headers=['HLMAC', 'Prev. hop ID', 'Node Type', 'Main Tree', 'Parent MAC'], tablefmt='fancy_grid', stralign='center'))
 
 ###############################################################################################################################################################################################
     def print_trees_table(self):
@@ -376,9 +389,9 @@ class pkt_sniffer:
         self.write_on_file('[INFO] Iniciado proceso balance de carga de computación')
         self.write_on_file('[INFO] Valor de carga computacional LEAF %d' %self.computational_load)
         #CAMINO SELECCIONADO (Ahora mismo CAMINO PRINCIPAL)
-        camino_principal = 0
+        #self.tree_index = 0
 
-        #if (self.node_label[camino_principal][2] == 'LEAF' or self.trees_table[camino_principal][2] == 'LEAF') and self.flag_init_load:
+        #if (self.node_label[self.tree_index][2] == 'LEAF' or self.trees_table[self.tree_index][2] == 'LEAF') and self.flag_init_load:
         #time.sleep(5)
         #self.write_on_file('[INFO] Paquete de carga enviado')
         self.pkt_creation(3)
@@ -387,7 +400,7 @@ class pkt_sniffer:
         #print (now.strftime("%Y-%m-%d %H:%M:%S"))
         #self.write_computing_info([(self.interface_name,'Node type','Node load','Children','Children load', 'Final balance')])
         #self.computational_load = 0 #Ya se ha mandado la carga
-        self.write_computing_info('LEAF',camino_principal,[], 0)
+        self.write_computing_info('LEAF',[], 0)
         #self.flag_init_load = False
 
         #self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
@@ -395,7 +408,7 @@ class pkt_sniffer:
 
         return
         '''
-        elif (self.node_label[camino_principal][2] == 'PARENT' and self.trees_table[camino_principal][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
+        elif (self.node_label[self.tree_index][2] == 'PARENT' and self.trees_table[self.tree_index][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
             flags=[]
             power=[]
             value=0
@@ -406,20 +419,20 @@ class pkt_sniffer:
                 value+=entry[2]
 
             if len(self.sons_info) == len(flags):
-                #self.write_computing_info('PARENT',camino_principal,power, value)
+                #self.write_computing_info('PARENT',self.tree_index,power, value)
                 self.computational_load += value
                 self.write_on_file('[INFO] Actualizado valor de carga %d' % self.computational_load)
                 if self.node_ID != ID_ROOT:   #El ROOT no comparte, solo actualiza su valor
                     self.pkt_creation(3)
                     self.write_on_file('[INFO] Paquete de carga enviado con %d' %self.computational_load)
-                    self.write_computing_info('PARENT',camino_principal,power, value)
+                    self.write_computing_info('PARENT',self.tree_index,power, value)
                     #self.write_computing_info([('Node name','Node type','Node load','Children','Children load', 'Final balance')])
                     #self.computational_load = 0 #Ya se ha mandado la carga
 
                     self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
 
                 else:
-                    self.write_computing_info('ROOT',camino_principal,power, value)
+                    self.write_computing_info('ROOT',self.tree_index,power, value)
                     self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
                     self.write_on_file('[INFO] ---        Balance total: %d        ---' %self.computational_load)
                 #self.flag_init_load = False
@@ -430,23 +443,48 @@ class pkt_sniffer:
         mac = [hex(int(data[x])) for x in range(0,6)]
         mac_src = self.mac_from_list_to_str(mac)  #Conversión mac
 
+        self.check_neigh_expiration()   #ACTUALIZAR TIME STAMP VECINOS
+
         flag_existe=False
+        self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
         for entry in self.info_neighbours:         #Comprobación de que no haya entradas repetidas y actualizacion t.vida
             if entry[0] == mac_src:
                 flag_existe=True
-                entry[2] = TIME_ACTIVE_HELLO
+                t_stamp = round(time.time() * 1000000) #timestamp en us
+                entry[2] = t_stamp + TIME_ACTIVE_HELLO*1000000 #Tiempo de entrada activa en us
 
         if not flag_existe:
+            self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
             id_vecino = self.cnt_neighbours[0]
             self.cnt_neighbours.pop(0)
-            self.info_neighbours.append([mac_src, id_vecino, TIME_ACTIVE_HELLO])
+            t_stamp = round(time.time() * 1000000) #timestamp en us
+            t_active = t_stamp + TIME_ACTIVE_HELLO*1000000 #Tiempo de entrada activa en us
+            self.info_neighbours.append([mac_src, id_vecino, t_active])
             self.write_on_file('[INFO] Nuevo vecino descubierto con ID %s' % id_vecino)
             self.print_info_neighbours()
+
+
+###############################################################################################################################################################################################
+    def check_neigh_expiration(self):
+        if self.info_neighbours:
+            for neigh in self.info_neighbours:
+                t_stamp = round(time.time() * 1000000) #timestamp en us
+                if t_stamp > neigh[2]:
+                    self.write_on_file('[INFO] Entrada caducada del vecino con ID %d' % neigh[1])
+                    self.cnt_neighbours.append(int(neigh[1]))
+                    self.cnt_neighbours.sort()
+                    self.info_neighbours.remove(neigh)   #BORRO VECINO DE TABLA DE VECINOS
+
+            #self.print_info_neighbours()
+
+            if len(self.cnt_neighbours) < 3:
+                self.cnt_neighbours+=list(range(26,51))
 
 ###############################################################################################################################################################################################
     def get_previous_hop(self,pkt):
         data = struct.unpack("!6B", pkt[6:12])
         mac_src='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
+        self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
         for neigh in self.info_neighbours:
             if neigh[0] == mac_src:
                 return(neigh[1])
@@ -481,10 +519,13 @@ class pkt_sniffer:
             self.sons_info = []
             self.main_labels = []
             self.flag_init_load = False
+            self.long_ant = 0
+            self.value_ant = None
             self.computational_load = random.randint(-10,10) #Nuevo valor de carga para la iteración
             self.write_on_file('\n---------------------------------------------------------')
             self.write_on_file('---    Nueva iteración: %d    ---' %self.iteration)
             self.write_on_file('---------------------------------------------------------')
+            print('[INFO] Nueva carga para nodo: %d' % self.computational_load)
 
             f=open(PATH+'computing_info_it_%d.txt' % self.iteration,'w')
             f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
@@ -537,7 +578,7 @@ class pkt_sniffer:
 
                     if label[0] == label_new_2:  #Ya tengo la etiqueta guardada, actualizo TTL
                         flag_exite_dedenne = True
-                        label[4] = TIME_ACTIVE_LABEL
+                        #label[4] = TIME_ACTIVE_LABEL
                         label[1] = self.get_previous_hop(pkt)
                         #GENERO MENSAJE Y LO ENVÍO CON label_new_2
                         self.pkt_creation(2,label)
@@ -575,15 +616,15 @@ class pkt_sniffer:
                                         id_hijo=int(label_new[len(label_new)-2])
                                         if not (id_hijo in entry[3]):
                                             entry[3].append(id_hijo)
-                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
+                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
                                             #self.print_trees_table()
 
                                             self.sons_info.append([id_hijo, False, 0])
-                                             #self.print_sons_table()
+                                            self.print_sons_table()
 
                                         if label[2] != 'PARENT':
                                             label[2] = 'PARENT'
-                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
+                                            #self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
                                             #self.print_labels()
                                         break
 
@@ -639,7 +680,9 @@ class pkt_sniffer:
                         if self.get_previous_hop(pkt) == 0:  #Hasta que no conozca al vecino, no añado su etiqueta
                             return
 
-                        self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal,TIME_ACTIVE_LABEL, mac_src])
+                        #self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal,TIME_ACTIVE_LABEL, mac_src])
+                        self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal, mac_src])
+
                         #self.write_on_file('[INFO] New Dedenne Label: %s' % label_new_2)
                         #self.print_labels()
 
@@ -668,6 +711,7 @@ class pkt_sniffer:
                 #print('FLAG INIT LOAD ' + str(self.flag_init_load))
                 #self.print_labels()
                 #self.print_trees_table()
+                self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
                 if len(self.info_neighbours) == 1 and mac_src == self.info_neighbours[0][0] and not self.flag_init_load:    #ONLY ONE NEIGHBOUR?
                     self.trees_table[0][2] = 'LEAF'
                     self.node_label[0][2] = 'LEAF'
@@ -700,6 +744,7 @@ class pkt_sniffer:
                 if label_new_2[0:len(label_new_2)-4] == '1':
                     data = struct.unpack("!6B", pkt[6:12])
                     mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
+                    self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
                     for neigh in self.info_neighbours:
                         if neigh[0] == mac_rcv:
                             if not neigh[1] in self.trees_table[0][3]:
@@ -714,6 +759,8 @@ class pkt_sniffer:
     def process_load_pkt(self, data, pkt):
         orig = struct.unpack("!6B", pkt[6:12])
         mac_rcv='%s:%s:%s:%s:%s:%s' % (format(orig[0], '02x'),format(orig[1], '02x'),format(orig[2], '02x'),format(orig[3], '02x'),format(orig[4], '02x'),format(orig[5], '02x'))
+        print('MAC_src paquete de carga: %s' % mac_rcv)
+        self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
         for neigh in self.info_neighbours:
             if neigh[0] == mac_rcv:
                 if neigh[1] in self.trees_table[0][3]:
@@ -729,22 +776,27 @@ class pkt_sniffer:
                             self.print_sons_table()
                             break
 
-        camino_principal=0
-        #print(self.node_label)
-        #print(self.trees_table)
-        if (self.node_label[camino_principal][2] == 'PARENT' and self.trees_table[camino_principal][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
+        #self.tree_index=0
+        self.print_labels()
+        self.print_trees_table()
+        if (self.node_label[self.tree_index][2] == 'PARENT' and self.trees_table[self.tree_index][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
+            #print('ENTRO')
             flags=[]
             power=[]
             value=0
             for entry in self.sons_info:
                 if entry[1]:
                     flags.append(entry[1])
-                power.append(entry[2])
-                value+=entry[2]   #CALCULATE GENERAL LOAD
+                    power.append(entry[2])
+                    value+=entry[2]   #CALCULATE GENERAL LOAD
 
+            print(len(self.sons_info))
+            print(len(flags))
             if len(self.sons_info) == len(flags):
                 #self.computational_load += value
-                if self.long_ant < len(self.sons_info) or self.value_ant != value:
+                print(self.long_ant)
+                print(self.value_ant)
+                if self.long_ant < len(self.sons_info) or self.value_ant != value:    #Para solo enviar si hay cambio de información (En nº vecinos o valor de carga): No constantemente
                     self.long_ant = len(self.sons_info)
                     self.value_ant = value
                     #self.print_sons_table()
@@ -757,19 +809,19 @@ class pkt_sniffer:
                         self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
                         #self.write_on_file('[INFO] Paquete de carga enviado')
-                        self.write_computing_info('PARENT',camino_principal,power, value)
+                        self.write_computing_info('PARENT',power, value)
                         #self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
                         #self.write_on_file('[INFO] Nuevo valor de carga %d' % self.computational_load)
                         #now = datetime.datetime.now()
                         #print ("Fin envio paquete de carga : ")
                         #print (now.strftime("%Y-%m-%d %H:%M:%S"))
                     else:
-                        self.write_computing_info('ROOT',camino_principal,power, value)
+                        self.write_computing_info('ROOT',power, value)
                         self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
                         self.write_on_file('[INFO] ---        Balance total: %d        ---' % (self.computational_load+value))
-                        #now = datetime.datetime.now()
-                        #print ("Fin procesado root : ")
-                        #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+                        now = datetime.datetime.now()
+                        print ("Fin procesado root : ")
+                        print (now.strftime("%Y-%m-%d %H:%M:%S.%f"))
                         self.computational_load=0
                         #print(self.sons_info)
                         #for son in self.sons_info:
@@ -822,15 +874,30 @@ class pkt_sniffer:
                             data = struct.unpack("!2B1B8B1B", pkt[12:24])
                             self.process_propagation_pkt(data, pkt)
                         elif option == 3:
-                            #print('Recibido paquete de carga')
+                            print('Recibido paquete de carga')
                             data = struct.unpack("!1B1B" , pkt[15:17])
                             self.process_load_pkt(data, pkt)
 
             for interface_writable in writable:
                 n_msg=len(self.message_queues[self.interface_name])
-                for msg in range (0, n_msg):
+                '''for msg in range (0, n_msg):
+                    print('Envio paquete %s' % self.message_queues[self.interface_name][msg])
                     interface_writable.send(self.message_queues[self.interface_name][msg])
-                self.message_queues[self.interface_name]=self.message_queues[self.interface_name][n_msg:]
+                    self.message_queues[self.interface_name].pop(msg) #nos cargamos ese mensaje
+                #self.message_queues[self.interface_name]=self.message_queues[self.interface_name][n_msg:]
+                '''
+                for idx, msg in enumerate(self.message_queues[self.interface_name]):
+                    #print('Envio paquete %s' % msg)
+                    interface_writable.send(msg)
+                    self.message_queues[self.interface_name].pop(idx) #nos cargamos ese mensaje
+                '''try:
+                    if self.message_queues.has_key(interface_writable):
+                        self.message_queues.pop(interface_writable,None)
+
+                    if interface_writable in self.outputs:
+                        self.outputs.remove(interface_writable)
+                except Exception as exception:
+                    continue '''
 
 ###############################################################################################################################################################################################
 
