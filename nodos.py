@@ -10,6 +10,7 @@ import re
 from tabulate import tabulate
 import random
 import os
+import multiprocessing
 
 ETH_TYPE_CUSTOM = 65467 #valor del eth custom para hellos
 TIME_OUT = 1000
@@ -17,7 +18,7 @@ NODE_NO_SDN = 2 #id del dispositivo switch no sdn
 TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
 TIME_INIT_PROPAGATION = 10
-TIME_DEDENNE = 4 #segundos
+TIME_DEDENNE = 5 #segundos
 #TIME_ACTIVE_LABEL = 12 #segundos
 MAX_DEDENNE_LABELS = 10 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
@@ -25,8 +26,8 @@ FLAG_LABELS_INFO = True
 DIGITOS_PREFIJO = 2
 FLAG_PREFIJO = True
 MAC_DST = 'FF:FF:FF:FF:FF:FF'
-ID_ROOT = 1
-FLAG_FILE = False
+ID_ROOT = 23
+FLAG_FILE = True
 PATH = './Logs/'
 TIME_INIT_LOAD = 30
 
@@ -63,6 +64,8 @@ class pkt_sniffer:
         self.long_ant = 0
         self.value_ant = None
         self.tree_index = 0 #DE MOMENTO SOLO CAMINO PRINCIPAL
+        self.timer_ACK = None
+        self.flag_ACK = False
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -118,13 +121,15 @@ class pkt_sniffer:
 
 
 ###############################################################################################################################################################################################
-    def pkt_creation(self, option, label=[], timestamp=0,valor=0):
+    def pkt_creation(self, option, label=[], timestamp=0,valor=0, src=''):
         eth_header = {}
         eth_header["mac_src"] = self.node_mac.split(":")
 
         if option == 3:  #UNICAST PARA LOAD PACKAGES
             dst=self.node_label[self.tree_index][4]
             eth_header["mac_dst"] = dst.split(":")
+        elif option == 4:
+            eth_header["mac_dst"] = src.split(":")
         else:   #BROADCAST PARA RESTO DE PACKAGES
             eth_header["mac_dst"] = MAC_DST.split(":")
 
@@ -167,7 +172,7 @@ class pkt_sniffer:
                 self.write_on_file('---   Nueva iteración desde root: %d    ---' % self.iteration)
                 now = datetime.datetime.now()
                 #print ("Nueva iteración desde root : ")
-                print (now.strftime("%Y-%m-%d %H:%M:%S.%f"))
+                self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
                 self.write_on_file('---------------------------------------------------------')
 
                 self.trees_table=[]
@@ -244,6 +249,27 @@ class pkt_sniffer:
 
             self.send_pkt(pkt)
             self.write_on_file('[INFO] Paquete de carga enviado con %d a MAC %s' % ((self.computational_load+valor),dst))
+
+            #self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))  #Hilo de espera de 1s para recepción de ACK
+            self.timer_ACK=multiprocessing.Process(target=self.wait_ACK, args=(pkt,))
+            #self.timer_ACK.daemon = True
+            self.timer_ACK.start()
+            self.write_on_file('[INFO] Iniciado timer de ACK')
+
+        if option == 4:
+            pkt = cabecera
+            pkt += struct.pack("!49x")
+            self.send_pkt(pkt)
+            self.write_on_file('[INFO] ACK enviado a MAC %s' % src)
+
+###############################################################################################################################################################################################
+    def wait_ACK(self, pkt):
+        while(1):
+            time.sleep(1)
+            if not self.flag_ACK:
+                self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
+                self.send_pkt(pkt)
+                break
 
 ###############################################################################################################################################################################################
     def write_on_file(self,line):
@@ -521,6 +547,7 @@ class pkt_sniffer:
             self.flag_init_load = False
             self.long_ant = 0
             self.value_ant = None
+            self.flag_ACK = False
             self.computational_load = random.randint(-10,10) #Nuevo valor de carga para la iteración
             self.write_on_file('\n---------------------------------------------------------')
             self.write_on_file('---    Nueva iteración: %d    ---' %self.iteration)
@@ -759,7 +786,10 @@ class pkt_sniffer:
     def process_load_pkt(self, data, pkt):
         orig = struct.unpack("!6B", pkt[6:12])
         mac_rcv='%s:%s:%s:%s:%s:%s' % (format(orig[0], '02x'),format(orig[1], '02x'),format(orig[2], '02x'),format(orig[3], '02x'),format(orig[4], '02x'),format(orig[5], '02x'))
-        print('MAC_src paquete de carga: %s' % mac_rcv)
+        self.write_on_file('[INFO] Recibido paquete de carga con MAC_src %s' % mac_rcv)
+
+        self.pkt_creation(4,[],0,0,mac_rcv)    #ACK
+
         self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
         for neigh in self.info_neighbours:
             if neigh[0] == mac_rcv:
@@ -790,12 +820,12 @@ class pkt_sniffer:
                     power.append(entry[2])
                     value+=entry[2]   #CALCULATE GENERAL LOAD
 
-            print(len(self.sons_info))
-            print(len(flags))
+            #print(len(self.sons_info))
+            #print(len(flags))
             if len(self.sons_info) == len(flags):
                 #self.computational_load += value
-                print(self.long_ant)
-                print(self.value_ant)
+                #print(self.long_ant)
+                #print(self.value_ant)
                 if self.long_ant < len(self.sons_info) or self.value_ant != value:    #Para solo enviar si hay cambio de información (En nº vecinos o valor de carga): No constantemente
                     self.long_ant = len(self.sons_info)
                     self.value_ant = value
@@ -820,8 +850,8 @@ class pkt_sniffer:
                         self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
                         self.write_on_file('[INFO] ---        Balance total: %d        ---' % (self.computational_load+value))
                         now = datetime.datetime.now()
-                        print ("Fin procesado root : ")
-                        print (now.strftime("%Y-%m-%d %H:%M:%S.%f"))
+                        self.write_on_file("[INFO] Fin procesado root : ")
+                        self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
                         self.computational_load=0
                         #print(self.sons_info)
                         #for son in self.sons_info:
@@ -874,9 +904,18 @@ class pkt_sniffer:
                             data = struct.unpack("!2B1B8B1B", pkt[12:24])
                             self.process_propagation_pkt(data, pkt)
                         elif option == 3:
-                            print('Recibido paquete de carga')
+                            #self.write_on_file('[INFO] Recibido paquete de carga')
                             data = struct.unpack("!1B1B" , pkt[15:17])
                             self.process_load_pkt(data, pkt)
+                        elif option == 4:
+                            #print('Recibido ACK')
+                            data = struct.unpack("!6B" , pkt[6:12])
+                            mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
+                            if mac_rcv == self.node_label[self.tree_index][4]:   #Recibido ACK de mi PADRE
+                                self.flag_ACK = True
+                                self.write_on_file('[INFO] ACK recibido del nodo PADRE con MAC %s' % mac_rcv)
+                                self.timer_ACK.terminate()
+                                self.timer_ACK = None
 
             for interface_writable in writable:
                 n_msg=len(self.message_queues[self.interface_name])
