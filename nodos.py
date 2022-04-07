@@ -20,14 +20,14 @@ TIME_ACTIVE_HELLO = 9 #segundos
 TIME_INIT_PROPAGATION = 10
 TIME_DEDENNE = 5 #segundos
 #TIME_ACTIVE_LABEL = 12 #segundos
-MAX_DEDENNE_LABELS = 10 #etiquetas dedenne max por nodo
+MAX_DEDENNE_LABELS = 1 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
 FLAG_LABELS_INFO = True
 DIGITOS_PREFIJO = 2
 FLAG_PREFIJO = True
 MAC_DST = 'FF:FF:FF:FF:FF:FF'
-ID_ROOT = 23
-FLAG_FILE = True
+ID_ROOT = 1
+FLAG_FILE = False
 PATH = './Logs/'
 TIME_INIT_LOAD = 30
 
@@ -66,6 +66,11 @@ class pkt_sniffer:
         self.tree_index = 0 #DE MOMENTO SOLO CAMINO PRINCIPAL
         self.timer_ACK = None
         self.flag_ACK = False
+        self.t_stamp_hijo = 0
+        self.abs_load_balance = 0
+        ###########################################
+        self.datos_almacenados = dict()  #Almacenamiento datos en fichero de resultados
+        ###########################################
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -166,11 +171,13 @@ class pkt_sniffer:
             pkt = cabecera
 
             if self.node_ID == ID_ROOT:
-                self.time_stamp = round(time.time() * 1000000) #timestamp en us
+                now = datetime.datetime.now()
+                self.time_stamp = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                #self.time_stamp = round(time.time() * 1000000) #timestamp en us
                 #print('Time stamp root: %d' %self.time_stamp )
                 self.write_on_file('\n---------------------------------------------------------')
                 self.write_on_file('---   Nueva iteración desde root: %d    ---' % self.iteration)
-                now = datetime.datetime.now()
+                #now = datetime.datetime.now()
                 #print ("Nueva iteración desde root : ")
                 self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
                 self.write_on_file('---------------------------------------------------------')
@@ -180,6 +187,25 @@ class pkt_sniffer:
                 self.iteration += 1
                 self.long_ant = 0
                 self.value_ant = None
+                self.t_stamp_hijo = 0
+                self.abs_load_balance = 0
+                ###########################################
+                self.datos_almacenados = dict()  #Reinicio datos almacenados para la siguiente iteracion
+                self.datos_almacenados["node"] = self.node_ID
+                self.datos_almacenados["type"] = 1 #ROOT
+                self.datos_almacenados["time_IDs"] = 0 #Por ser root
+                self.datos_almacenados["n_ID_pkt"] = 0
+                self.datos_almacenados["n_LOAD_pkt"] = 0
+                self.datos_almacenados["n_ACK_pkt"] = 0
+                self.datos_almacenados["n_total_LOAD_pkt"] = 0
+                self.datos_almacenados["retries"] = 0  #Por ser root (No espera ACK)
+                self.datos_almacenados["root_time"] = self.time_stamp   #En us
+                self.datos_almacenados["load_time"] = 0
+                self.datos_almacenados["init_node_load"] = 0 #Por ser root (No tiene carga)
+                self.datos_almacenados["t_stamp_hijo"] = 0
+                self.datos_almacenados["abs_load_balance"] = 0
+                self.datos_almacenados["t_stamp_ultimo_hijo"] = 0
+                ###########################################
 
             timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
             #print('Hex time_stamp: ' + str(timestamp_hex))
@@ -233,6 +259,7 @@ class pkt_sniffer:
                                         #                                       |     --eth_header--      |        |  --data--   |
             if self.node_ID != ID_ROOT:
                 self.send_pkt(self.label_propagation_packet)
+                self.datos_almacenados["n_ID_pkt"] += 1
 
         if option == 3:     #COMPUTATIONAL LOAD SHARING FROM LEAFS
             pkt = cabecera
@@ -245,31 +272,53 @@ class pkt_sniffer:
             pkt += struct.pack("!1B", int(bytes(sign_hex[0],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
             value = [hex(int(abs(self.computational_load+valor)) & 0xff)]
             pkt += struct.pack("!1B", int(bytes(value[0],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
-            pkt += struct.pack("!47x")
+
+            print('VALOR ABS ACTUAL %d' % self.datos_almacenados["abs_load_balance"])
+            print('VALOR TIME STAMP HIJO %d' % self.datos_almacenados["t_stamp_hijo"])
+
+            abs_value = [hex(self.datos_almacenados["abs_load_balance"] >> i & 0xff) for i in (8,0)]
+            pkt += struct.pack("!2B", int(bytes(abs_value[0],'utf-8'),16), int(bytes(abs_value[1],'utf-8'),16))  #[MAIN_TREE] -> Flag de pertenencia al árbol principal
+
+            timestamp_hex = [hex(self.datos_almacenados["t_stamp_hijo"] >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
+            #print('Hex time_stamp: ' + str(timestamp_hex))
+            pkt += struct.pack("!8B",
+                    int(bytes(timestamp_hex[0],'utf-8'),16), int(bytes(timestamp_hex[1],'utf-8'),16), int(bytes(timestamp_hex[2],'utf-8'),16),
+                    int(bytes(timestamp_hex[3],'utf-8'),16), int(bytes(timestamp_hex[4],'utf-8'),16), int(bytes(timestamp_hex[5],'utf-8'),16),
+                    int(bytes(timestamp_hex[6],'utf-8'),16), int(bytes(timestamp_hex[7],'utf-8'),16))
+
+            pkt += struct.pack("!37x")
 
             self.send_pkt(pkt)
             self.write_on_file('[INFO] Paquete de carga enviado con %d a MAC %s' % ((self.computational_load+valor),dst))
+            self.datos_almacenados["load_balance"] = self.computational_load+valor
+            self.datos_almacenados["n_LOAD_pkt"] += 1
+            self.datos_almacenados["n_total_LOAD_pkt"] +=1
 
             #self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))  #Hilo de espera de 1s para recepción de ACK
-            self.timer_ACK=multiprocessing.Process(target=self.wait_ACK, args=(pkt,))
-            #self.timer_ACK.daemon = True
-            self.timer_ACK.start()
-            self.write_on_file('[INFO] Iniciado timer de ACK')
+            if not self.timer_ACK:
+                self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))
+                #self.timer_ACK.daemon = True
+                self.timer_ACK.start()
+                self.write_on_file('[INFO] Iniciado timer de ACK')
 
         if option == 4:
             pkt = cabecera
             pkt += struct.pack("!49x")
             self.send_pkt(pkt)
+            self.datos_almacenados["n_ACK_pkt"] += 1
+            self.datos_almacenados["n_total_LOAD_pkt"] += 1
             self.write_on_file('[INFO] ACK enviado a MAC %s' % src)
 
 ###############################################################################################################################################################################################
     def wait_ACK(self, pkt):
-        while(1):
-            time.sleep(1)
-            if not self.flag_ACK:
-                self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
-                self.send_pkt(pkt)
-                break
+        #while(1):
+        time.sleep(1)
+        if not self.flag_ACK:
+            self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
+            #self.send_pkt(pkt)
+            self.pkt_creation(3)   #SEND LOAD FRAME
+            self.datos_almacenados["retries"] += 1  #Por ser root (No espera ACK)
+            #break
 
 ###############################################################################################################################################################################################
     def write_on_file(self,line):
@@ -281,9 +330,13 @@ class pkt_sniffer:
             print(line)
 
 ###############################################################################################################################################################################################
-    def write_computing_info(self, node_type, power, value):
-        f=open(PATH+'computing_info_it_%d.txt' % (self.iteration-1),'a')
-        f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load, str(self.trees_table[self.tree_index][3]), str(power), self.computational_load+value))
+    def write_computing_info(self):
+        #f=open(PATH+'computing_info_it_%d.txt' % (self.iteration-1),'a')
+        #f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load, str(self.trees_table[self.tree_index][3]), str(power), self.computational_load+value))
+        #f.close()
+        f=open(PATH+'info_it_%d.txt' % (self.iteration-1),'a')
+        f.write("{:<3} {:<3} {:<10} {:<3} {:<3} {:<3} {:<3} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format(self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["time_ID"], self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"], self.datos_almacenados["load_time"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"], self.datos_almacenados["init_node_load"],self.datos_almacenados["load_balance"], self.datos_almacenados["abs_load_balance"]))
+        #f.write("%d   %d   %d   %d   %d   %d   %d   %d   %d   %d\n" % (self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"], self.datos_almacenados["load_balance"], self.datos_almacenados["init_node_load"]))
         f.close()
 
 ###############################################################################################################################################################################################
@@ -420,13 +473,19 @@ class pkt_sniffer:
         #if (self.node_label[self.tree_index][2] == 'LEAF' or self.trees_table[self.tree_index][2] == 'LEAF') and self.flag_init_load:
         #time.sleep(5)
         #self.write_on_file('[INFO] Paquete de carga enviado')
+        self.datos_almacenados["t_stamp_hijo"] = round(time.time() * 1000000) #timestamp en us
+        self.datos_almacenados["abs_load_balance"] = abs(self.computational_load)
         self.pkt_creation(3)
         #now = datetime.datetime.now()
         #print ("Fin envio paquete de carga : ")
         #print (now.strftime("%Y-%m-%d %H:%M:%S"))
         #self.write_computing_info([(self.interface_name,'Node type','Node load','Children','Children load', 'Final balance')])
         #self.computational_load = 0 #Ya se ha mandado la carga
-        self.write_computing_info('LEAF',[], 0)
+        #self.write_computing_info('LEAF',[], 0)
+        self.datos_almacenados["time_ID"] = self.datos_almacenados["last_ID_time"] - self.datos_almacenados["root_time"]
+
+        #self.datos_almacenados["load_time"]= self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]
+        #self.write_computing_info()
         #self.flag_init_load = False
 
         #self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
@@ -554,12 +613,38 @@ class pkt_sniffer:
             self.write_on_file('---------------------------------------------------------')
             print('[INFO] Nueva carga para nodo: %d' % self.computational_load)
 
-            f=open(PATH+'computing_info_it_%d.txt' % self.iteration,'w')
-            f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
+            #f=open(PATH+'computing_info_it_%d.txt' % self.iteration,'w')
+            #f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
+            #f.write('-----------------------------------------------------------------------------------------\n')
+            #f.close()
+
+            f=open(PATH+'info_it_%d.txt' % self.iteration,'w')
+            #f.write('')
+            f.write("{:<3} {:<3} {:<10} {:<3} {:<3} {:<3} {:<3} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format('Nod', 'Typ','Time_ID', 'nID','nLO', 'nAC', 'nTL', 'Time_load', 'nRE', 'Time_Total', 'iLoad','l_bal', 'ab_ba'))
             f.write('-----------------------------------------------------------------------------------------\n')
             f.close()
-            self.iteration += 1
 
+            if self.timer_ACK:
+                self.timer_ACK.join()
+                self.timer_ACK = None
+            self.iteration += 1
+            self.t_stamp_hijo = 0
+            self.abs_load_balance = 0
+            ###########################################
+            self.datos_almacenados = dict()  #Reinicio de datos almacenados para la siguiente iteracion
+            self.datos_almacenados["node"] = self.node_ID
+            self.datos_almacenados["type"] = 3 #Por defecto LEAF
+            self.datos_almacenados["n_ID_pkt"] = 0
+            self.datos_almacenados["n_LOAD_pkt"] = 0
+            self.datos_almacenados["n_ACK_pkt"] = 0
+            self.datos_almacenados["n_total_LOAD_pkt"] = 0
+            self.datos_almacenados["retries"] = 0
+            self.datos_almacenados["root_time"] = self.time_stamp #En us
+            self.datos_almacenados["init_node_load"] = self.computational_load
+            self.datos_almacenados["total_time"] = 0 #Solo completa el root
+            self.datos_almacenados["t_stamp_hijo"] = 0
+            self.datos_almacenados["t_stamp_ultimo_hijo"] = 0
+            ###########################################
 
         data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[24:(24+long_HLMAC)+1])
         label_new=''
@@ -591,6 +676,8 @@ class pkt_sniffer:
             if flag_main_tree:   #ALMACENAR ETIQUETAS DEL CAMINO PRINCIPAL PARA LUEGO DEDICIR SI LEAF
                 self.main_labels.append(label_new_2)
                 #print('main_labels: %s' % self.main_labels)
+                #now = datetime.datetime.now()
+                self.datos_almacenados["last_ID_time"] = round(time.time() * 1000000)  #en us
 
             data = struct.unpack("!6B", pkt[6:12])
             #mac_src = data[0:6]
@@ -651,6 +738,7 @@ class pkt_sniffer:
 
                                         if label[2] != 'PARENT':
                                             label[2] = 'PARENT'
+                                            self.datos_almacenados["type"] = 2 #NODO PADRE
                                             #self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
                                             #self.print_labels()
                                         break
@@ -790,6 +878,35 @@ class pkt_sniffer:
 
         self.pkt_creation(4,[],0,0,mac_rcv)    #ACK
 
+        data = struct.unpack("!2B8B", pkt[17:27])   #Comprobación OPTION
+        abs_value = [hex(int(data[x])) for x in range(0,2)] #Comprobación ETH_TYPE
+        abs_value[1]=abs_value[1].replace('0x', '')
+        abs_value_rcv=abs_value[0] + abs_value[1]
+        abs_value_rcv=int(abs_value_rcv,16)
+
+        time_stamp_rcv='0x%s%s%s%s%s%s%s%s' % (format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'),format(data[6], '02x'),format(data[7], '02x'),format(data[8], '02x'),format(data[9], '02x'))
+        time_stamp_rcv=int(time_stamp_rcv,16)
+
+        print('VALOR ABS ACTUAL RCV %d' % abs_value_rcv)
+        print('VALOR TIME STAMP HIJO RCV %d' % time_stamp_rcv)
+
+        if self.datos_almacenados["t_stamp_hijo"] == 0:
+            self.datos_almacenados["t_stamp_hijo"] = time_stamp_rcv
+        elif self.datos_almacenados["t_stamp_hijo"] < time_stamp_rcv:
+            self.datos_almacenados["t_stamp_hijo"] = time_stamp_rcv
+            print('NUEVO STAMP HIJO MIN %d' % time_stamp_rcv)
+
+        if self.datos_almacenados["t_stamp_ultimo_hijo"] == 0:
+            self.datos_almacenados["t_stamp_ultimo_hijo"] = time_stamp_rcv
+        elif self.datos_almacenados["t_stamp_ultimo_hijo"] > time_stamp_rcv:
+            self.datos_almacenados["t_stamp_ultimo_hijo"] = time_stamp_rcv
+            print('NUEVO STAMP HIJO MAX %d' % time_stamp_rcv)
+        #self.datos_almacenados["t_stamp_ultimo_hijo"] = time_stamp_rcv
+
+        #abs_value_rcv=
+        #self.datos_almacenados["abs_load_balance"] = self.computational_load+abs_value_rcv
+        data = struct.unpack("!2B", pkt[15:17])   #Comprobación OPTION
+
         self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
         for neigh in self.info_neighbours:
             if neigh[0] == mac_rcv:
@@ -807,19 +924,24 @@ class pkt_sniffer:
                             break
 
         #self.tree_index=0
-        self.print_labels()
-        self.print_trees_table()
+        #self.print_labels()
+        #self.print_trees_table()
         if (self.node_label[self.tree_index][2] == 'PARENT' and self.trees_table[self.tree_index][2] == 'PARENT'):  #Comprobar si ya se ha recibido la info de todos los vecinos
             #print('ENTRO')
             flags=[]
             power=[]
             value=0
+            abs_value=0
             for entry in self.sons_info:
                 if entry[1]:
+                    #print('Entry[2] %d ' %entry[2])
                     flags.append(entry[1])
                     power.append(entry[2])
                     value+=entry[2]   #CALCULATE GENERAL LOAD
+                    abs_value+=abs(entry[2])
 
+            #print('ABS: %d' %abs_value)
+            #print('Value: %d' %value)
             #print(len(self.sons_info))
             #print(len(flags))
             if len(self.sons_info) == len(flags):
@@ -837,21 +959,35 @@ class pkt_sniffer:
                             #self.long_ant = len(self.sons_info)
                         self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
                         self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
+                        self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (self.computational_load+abs_value))
+                        self.datos_almacenados["abs_load_balance"] = abs(self.computational_load)+abs_value
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
                         #self.write_on_file('[INFO] Paquete de carga enviado')
-                        self.write_computing_info('PARENT',power, value)
+                        #self.write_computing_info('PARENT',power, value)
+                        self.datos_almacenados["time_ID"] = self.datos_almacenados["last_ID_time"] - self.datos_almacenados["root_time"]
+                        #self.write_computing_info()
                         #self.computational_load = random.randint(-10,10) #Nuevo valor de carga para siguiente iteración
                         #self.write_on_file('[INFO] Nuevo valor de carga %d' % self.computational_load)
                         #now = datetime.datetime.now()
                         #print ("Fin envio paquete de carga : ")
                         #print (now.strftime("%Y-%m-%d %H:%M:%S"))
                     else:
-                        self.write_computing_info('ROOT',power, value)
+                        #self.write_computing_info('ROOT',power, value)
                         self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
                         self.write_on_file('[INFO] ---        Balance total: %d        ---' % (self.computational_load+value))
+                        self.write_on_file('[INFO] ---        Balance absoluto: %d        ---' % abs_value)
+
                         now = datetime.datetime.now()
+                        a = datetime.datetime.timestamp(now) * 1000000 #timestamp en us
                         self.write_on_file("[INFO] Fin procesado root : ")
                         self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
+                        self.datos_almacenados["total_time"] = a - self.datos_almacenados["root_time"]  #SOLO POR SER ROOT  (En us)
+                        self.datos_almacenados["load_balance"] = self.computational_load+value
+                        self.datos_almacenados["time_ID"] = self.datos_almacenados["last_ID_time"] - self.datos_almacenados["root_time"]
+                        self.datos_almacenados["abs_load_balance"] = abs_value
+                        self.datos_almacenados["load_time"] = self.datos_almacenados["t_stamp_ultimo_hijo"] - self.datos_almacenados["t_stamp_hijo"]
+                        self.write_computing_info()
+
                         self.computational_load=0
                         #print(self.sons_info)
                         #for son in self.sons_info:
@@ -871,6 +1007,7 @@ class pkt_sniffer:
             #print(self.label_propagation_packet)
             #self.write_on_file('[INFO] Iniciado propagación etiquetas')
             self.send_pkt(self.label_propagation_packet)
+            self.datos_almacenados["n_ID_pkt"] += 1
             time.sleep(TIME_DEDENNE)
 
 ###############################################################################################################################################################################################
@@ -904,18 +1041,22 @@ class pkt_sniffer:
                             data = struct.unpack("!2B1B8B1B", pkt[12:24])
                             self.process_propagation_pkt(data, pkt)
                         elif option == 3:
-                            #self.write_on_file('[INFO] Recibido paquete de carga')
+                            #self.write_on_file('[INFO] -- Recibido LOAD --')
                             data = struct.unpack("!1B1B" , pkt[15:17])
                             self.process_load_pkt(data, pkt)
                         elif option == 4:
-                            #print('Recibido ACK')
+                            #self.write_on_file('[INFO] -- Recibido ACK --')
                             data = struct.unpack("!6B" , pkt[6:12])
                             mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
                             if mac_rcv == self.node_label[self.tree_index][4]:   #Recibido ACK de mi PADRE
                                 self.flag_ACK = True
                                 self.write_on_file('[INFO] ACK recibido del nodo PADRE con MAC %s' % mac_rcv)
-                                self.timer_ACK.terminate()
+                                self.timer_ACK.join()
                                 self.timer_ACK = None
+                                #now = datetime.datetime.now()
+                                self.datos_almacenados["t_ACK_parent"] = round(time.time() * 1000000)  #en us
+                                self.datos_almacenados["load_time"]= self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]
+                                self.write_computing_info()
 
             for interface_writable in writable:
                 n_msg=len(self.message_queues[self.interface_name])
@@ -927,6 +1068,7 @@ class pkt_sniffer:
                 '''
                 for idx, msg in enumerate(self.message_queues[self.interface_name]):
                     #print('Envio paquete %s' % msg)
+                    #print(msg)
                     interface_writable.send(msg)
                     self.message_queues[self.interface_name].pop(idx) #nos cargamos ese mensaje
                 '''try:
