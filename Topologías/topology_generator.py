@@ -18,7 +18,7 @@ def topology(args):
     kwargs['antennaGain'] = 6
 
     sta=[]
-    file=open('./Topologias/ad_hoc_5_edge.txt','r')
+    file=open('./Topologias/80-nodos.txt','r')
     i=1
     for line in file:
         line=line[0:len(line)-1]
@@ -31,7 +31,7 @@ def topology(args):
 
     info("*** Configuring wifi nodes\n")
     net.configureWifiNodes()
-    net.plotGraph(min_x=-100, max_x=700, min_y=-100, max_y=700)
+    net.plotGraph(min_x=-100, max_x=1000, min_y=-100, max_y=1000)
 
     info("*** Creating links\n")
     kwargs = dict()
