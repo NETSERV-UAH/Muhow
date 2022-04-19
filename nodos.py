@@ -18,7 +18,7 @@ NODE_NO_SDN = 2 #id del dispositivo switch no sdn
 TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
 TIME_INIT_PROPAGATION = 10
-TIME_DEDENNE = 5 #segundos
+TIME_DEDENNE = 10 #segundos
 #TIME_ACTIVE_LABEL = 12 #segundos
 MAX_DEDENNE_LABELS = 1 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
@@ -26,10 +26,11 @@ FLAG_LABELS_INFO = True
 DIGITOS_PREFIJO = 2
 FLAG_PREFIJO = True
 MAC_DST = 'FF:FF:FF:FF:FF:FF'
-ID_ROOT = 1
-FLAG_FILE = False
+ID_ROOT = 21
+FLAG_FILE = True
 PATH = './Logs/'
 TIME_INIT_LOAD = 30
+TIME_WAIT_ACK = 1
 
 ###############################################################################################################################################################################################
 def handler(signum, frame):  #Kill all threads
@@ -205,6 +206,7 @@ class pkt_sniffer:
                 self.datos_almacenados["t_stamp_hijo"] = 0
                 self.datos_almacenados["abs_load_balance"] = 0
                 self.datos_almacenados["t_stamp_ultimo_hijo"] = 0
+                self.datos_almacenados["abs_load_balance_list"] = []
                 ###########################################
 
             timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
@@ -312,12 +314,12 @@ class pkt_sniffer:
 ###############################################################################################################################################################################################
     def wait_ACK(self, pkt):
         #while(1):
-        time.sleep(1)
+        time.sleep(TIME_WAIT_ACK)
         if not self.flag_ACK:
             self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
             #self.send_pkt(pkt)
             self.pkt_creation(3)   #SEND LOAD FRAME
-            self.datos_almacenados["retries"] += 1  #Por ser root (No espera ACK)
+            self.datos_almacenados["retries"] += 1
             #break
 
 ###############################################################################################################################################################################################
@@ -334,7 +336,7 @@ class pkt_sniffer:
         #f=open(PATH+'computing_info_it_%d.txt' % (self.iteration-1),'a')
         #f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load, str(self.trees_table[self.tree_index][3]), str(power), self.computational_load+value))
         #f.close()
-        f=open(PATH+'info_it_%d.txt' % (self.iteration-1),'a')
+        f=open(PATH+'info_it_%d.txt' % (self.iteration-1),'a+')
         f.write("{:<3} {:<3} {:<10} {:<3} {:<3} {:<3} {:<3} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format(self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["time_ID"], self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"], self.datos_almacenados["load_time"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"], self.datos_almacenados["init_node_load"],self.datos_almacenados["load_balance"], self.datos_almacenados["abs_load_balance"]))
         #f.write("%d   %d   %d   %d   %d   %d   %d   %d   %d   %d\n" % (self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"], self.datos_almacenados["load_balance"], self.datos_almacenados["init_node_load"]))
         f.close()
@@ -473,7 +475,8 @@ class pkt_sniffer:
         #if (self.node_label[self.tree_index][2] == 'LEAF' or self.trees_table[self.tree_index][2] == 'LEAF') and self.flag_init_load:
         #time.sleep(5)
         #self.write_on_file('[INFO] Paquete de carga enviado')
-        self.datos_almacenados["t_stamp_hijo"] = round(time.time() * 1000000) #timestamp en us
+        now= datetime.datetime.now()
+        self.datos_almacenados["t_stamp_hijo"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
         self.datos_almacenados["abs_load_balance"] = abs(self.computational_load)
         self.pkt_creation(3)
         #now = datetime.datetime.now()
@@ -535,14 +538,16 @@ class pkt_sniffer:
         for entry in self.info_neighbours:         #Comprobación de que no haya entradas repetidas y actualizacion t.vida
             if entry[0] == mac_src:
                 flag_existe=True
-                t_stamp = round(time.time() * 1000000) #timestamp en us
+                now=datetime.datetime.now()
+                t_stamp = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
                 entry[2] = t_stamp + TIME_ACTIVE_HELLO*1000000 #Tiempo de entrada activa en us
 
         if not flag_existe:
             self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
             id_vecino = self.cnt_neighbours[0]
             self.cnt_neighbours.pop(0)
-            t_stamp = round(time.time() * 1000000) #timestamp en us
+            now=datetime.datetime.now()
+            t_stamp = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
             t_active = t_stamp + TIME_ACTIVE_HELLO*1000000 #Tiempo de entrada activa en us
             self.info_neighbours.append([mac_src, id_vecino, t_active])
             self.write_on_file('[INFO] Nuevo vecino descubierto con ID %s' % id_vecino)
@@ -553,7 +558,9 @@ class pkt_sniffer:
     def check_neigh_expiration(self):
         if self.info_neighbours:
             for neigh in self.info_neighbours:
-                t_stamp = round(time.time() * 1000000) #timestamp en us
+                now=datetime.datetime.now()
+                t_stamp = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                #t_stamp = round(time.time() * 1000000) #timestamp en us
                 if t_stamp > neigh[2]:
                     self.write_on_file('[INFO] Entrada caducada del vecino con ID %d' % neigh[1])
                     self.cnt_neighbours.append(int(neigh[1]))
@@ -644,6 +651,7 @@ class pkt_sniffer:
             self.datos_almacenados["total_time"] = 0 #Solo completa el root
             self.datos_almacenados["t_stamp_hijo"] = 0
             self.datos_almacenados["t_stamp_ultimo_hijo"] = 0
+            self.datos_almacenados["abs_load_balance_list"] = []
             ###########################################
 
         data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[24:(24+long_HLMAC)+1])
@@ -676,8 +684,8 @@ class pkt_sniffer:
             if flag_main_tree:   #ALMACENAR ETIQUETAS DEL CAMINO PRINCIPAL PARA LUEGO DEDICIR SI LEAF
                 self.main_labels.append(label_new_2)
                 #print('main_labels: %s' % self.main_labels)
-                #now = datetime.datetime.now()
-                self.datos_almacenados["last_ID_time"] = round(time.time() * 1000000)  #en us
+                now = datetime.datetime.now()
+                self.datos_almacenados["last_ID_time"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
 
             data = struct.unpack("!6B", pkt[6:12])
             #mac_src = data[0:6]
@@ -717,11 +725,15 @@ class pkt_sniffer:
 
                             ### COMPROBACIÓN TIPO DE NODO ###
                             #Si coincide el prefijo quitando los dos primeros dígitos => NODO HERMANO
+                            self.write_on_file('label %s' % label)
+                            self.write_on_file('label_new_2 %s' % label_new_2)
+                            self.write_on_file('label_new %s' % label_new)
                             if label_new_2[0:len(label_new_2)-4] == label:
                                 break
 
                             #Si prefijo ya está almacenado => NODO PADRE
-                            else:
+                            #else:
+                            elif label_new[0:len(label_new)-4] == label:
                                 for entry in self.trees_table:
                                     if entry[0] == label[0] and entry[1] == 'MAIN':
                                         if entry[2] != 'PARENT':
@@ -760,7 +772,8 @@ class pkt_sniffer:
                                 break
 
                             #Si prefijo ya está almacenado => NODO PADRE
-                            else:
+                            #else:
+                            elif label_new[0:len(label_new)-4] == label:
                                 for entry in self.trees_table:
                                     if entry[0] == label[0] and entry[1] == '-':
                                         if entry[2] != 'PARENT':
@@ -821,7 +834,7 @@ class pkt_sniffer:
                     self.write_on_file('[INFO] Nueva entrada añadida: %s' % label_new_2)
                     #self.print_trees_table()
 
-                #print('ETIQUETAS RECIBIDAS DEL ARBOL PRINCIPAL %s ' % self.main_labels)
+                self.write_on_file('ETIQUETAS RECIBIDAS DEL ARBOL PRINCIPAL %s ' % self.main_labels)
                 #print('TIPO NODO ARBOL PRINCIPAL %s' % self.node_label[0][2])
                 #print('FLAG INIT LOAD ' + str(self.flag_init_load))
                 #self.print_labels()
@@ -884,23 +897,26 @@ class pkt_sniffer:
         abs_value_rcv=abs_value[0] + abs_value[1]
         abs_value_rcv=int(abs_value_rcv,16)
 
+        #if self.node_ID == ID_ROOT:
+        self.datos_almacenados["abs_load_balance_list"].append(abs_value_rcv)
+        print(self.datos_almacenados["abs_load_balance_list"])
+
         time_stamp_rcv='0x%s%s%s%s%s%s%s%s' % (format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'),format(data[6], '02x'),format(data[7], '02x'),format(data[8], '02x'),format(data[9], '02x'))
         time_stamp_rcv=int(time_stamp_rcv,16)
 
-        print('VALOR ABS ACTUAL RCV %d' % abs_value_rcv)
-        print('VALOR TIME STAMP HIJO RCV %d' % time_stamp_rcv)
+        #print('VALOR ABS ACTUAL RCV %d' % abs_value_rcv)
+        #print('VALOR TIME STAMP HIJO RCV %d' % time_stamp_rcv)
 
-        if self.datos_almacenados["t_stamp_hijo"] == 0:
+        if self.datos_almacenados["t_stamp_hijo"] > time_stamp_rcv or self.datos_almacenados["t_stamp_hijo"] == 0:
             self.datos_almacenados["t_stamp_hijo"] = time_stamp_rcv
-        elif self.datos_almacenados["t_stamp_hijo"] < time_stamp_rcv:
-            self.datos_almacenados["t_stamp_hijo"] = time_stamp_rcv
-            print('NUEVO STAMP HIJO MIN %d' % time_stamp_rcv)
-
+        #print('NUEVO STAMP HIJO MIN ALMACENADO %d' % self.datos_almacenados["t_stamp_hijo"])
+        '''
         if self.datos_almacenados["t_stamp_ultimo_hijo"] == 0:
             self.datos_almacenados["t_stamp_ultimo_hijo"] = time_stamp_rcv
         elif self.datos_almacenados["t_stamp_ultimo_hijo"] > time_stamp_rcv:
             self.datos_almacenados["t_stamp_ultimo_hijo"] = time_stamp_rcv
             print('NUEVO STAMP HIJO MAX %d' % time_stamp_rcv)
+        '''
         #self.datos_almacenados["t_stamp_ultimo_hijo"] = time_stamp_rcv
 
         #abs_value_rcv=
@@ -959,8 +975,9 @@ class pkt_sniffer:
                             #self.long_ant = len(self.sons_info)
                         self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
                         self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
+                        #self.datos_almacenados[]
                         self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (self.computational_load+abs_value))
-                        self.datos_almacenados["abs_load_balance"] = abs(self.computational_load)+abs_value
+                        self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])+abs(self.computational_load)
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
                         #self.write_on_file('[INFO] Paquete de carga enviado')
                         #self.write_computing_info('PARENT',power, value)
@@ -978,14 +995,14 @@ class pkt_sniffer:
                         self.write_on_file('[INFO] ---        Balance absoluto: %d        ---' % abs_value)
 
                         now = datetime.datetime.now()
-                        a = datetime.datetime.timestamp(now) * 1000000 #timestamp en us
+                        current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
                         self.write_on_file("[INFO] Fin procesado root : ")
                         self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
-                        self.datos_almacenados["total_time"] = a - self.datos_almacenados["root_time"]  #SOLO POR SER ROOT  (En us)
+                        self.datos_almacenados["total_time"] = current_time - self.datos_almacenados["root_time"]  #SOLO POR SER ROOT  (En us)
                         self.datos_almacenados["load_balance"] = self.computational_load+value
                         self.datos_almacenados["time_ID"] = self.datos_almacenados["last_ID_time"] - self.datos_almacenados["root_time"]
-                        self.datos_almacenados["abs_load_balance"] = abs_value
-                        self.datos_almacenados["load_time"] = self.datos_almacenados["t_stamp_ultimo_hijo"] - self.datos_almacenados["t_stamp_hijo"]
+                        self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])
+                        self.datos_almacenados["load_time"] = current_time - self.datos_almacenados["t_stamp_hijo"]
                         self.write_computing_info()
 
                         self.computational_load=0
@@ -1053,9 +1070,10 @@ class pkt_sniffer:
                                 self.write_on_file('[INFO] ACK recibido del nodo PADRE con MAC %s' % mac_rcv)
                                 self.timer_ACK.join()
                                 self.timer_ACK = None
-                                #now = datetime.datetime.now()
-                                self.datos_almacenados["t_ACK_parent"] = round(time.time() * 1000000)  #en us
-                                self.datos_almacenados["load_time"]= self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]
+                                now = datetime.datetime.now()
+                                self.datos_almacenados["t_ACK_parent"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us  #en us
+                                print('ACK %d | Load %d | diff %d' % (self.datos_almacenados["t_ACK_parent"],self.datos_almacenados["t_stamp_hijo"], self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]))
+                                self.datos_almacenados["load_time"]= self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"] - TIME_WAIT_ACK*1000000 #Restar tiempo wait ACK (1º intento)
                                 self.write_computing_info()
 
             for interface_writable in writable:
