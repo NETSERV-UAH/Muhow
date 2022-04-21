@@ -18,7 +18,7 @@ NODE_NO_SDN = 2 #id del dispositivo switch no sdn
 TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
 TIME_INIT_PROPAGATION = 10
-TIME_DEDENNE = 5 #segundos
+TIME_DEDENNE = 10 #segundos
 #TIME_ACTIVE_LABEL = 12 #segundos
 MAX_DEDENNE_LABELS = 1 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
@@ -72,7 +72,6 @@ class pkt_sniffer:
         ###########################################
         self.datos_almacenados = dict()  #Almacenamiento datos en fichero de resultados
         ###########################################
-        self.timer_hello = 0
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -312,7 +311,6 @@ class pkt_sniffer:
             pkt = cabecera
             pkt += struct.pack("!49x")
             self.send_pkt(pkt)
-            #print(self.message_queues)
             self.datos_almacenados["n_ACK_pkt"] += 1
             self.datos_almacenados["n_total_LOAD_pkt"] += 1
             self.write_on_file('[INFO] ACK en cola de salida hacia MAC %s' % src)
@@ -355,17 +353,17 @@ class pkt_sniffer:
     def send_pkt(self, pkt): #Enviar el pkt
         self.outputs = self.inputs
         for interface in self.inputs:
-            #nombre_ifaz = self.interface_name
-            if not interface in self.message_queues.keys():
+            nombre_ifaz = self.interface_name
+            if not nombre_ifaz in self.message_queues.keys():
                     self.message_queues[interface] = []
 
             self.message_queues[interface].append(pkt)
 
 ###############################################################################################################################################################################################
     def hello_loop(self): #Enviar el pkt
-        #while(1):
-        self.send_pkt(self.hello_packet)
-        #time.sleep(TIME_HELLO)
+        while(1):
+            self.send_pkt(self.hello_packet)
+            time.sleep(TIME_HELLO)
 
 ###############################################################################################################################################################################################
     def print_info_neighbours(self):
@@ -477,8 +475,8 @@ class pkt_sniffer:
         #while 1:
             #if self.flag_init_load:
 
-        #self.write_on_file('[INFO] Iniciado proceso balance de carga de computación')
-        #self.write_on_file('[INFO] Valor de carga computacional LEAF %d' %self.computational_load)
+        self.write_on_file('[INFO] Iniciado proceso balance de carga de computación')
+        self.write_on_file('[INFO] Valor de carga computacional LEAF %d' %self.computational_load)
         #CAMINO SELECCIONADO (Ahora mismo CAMINO PRINCIPAL)
         #self.tree_index = 0
 
@@ -857,8 +855,8 @@ class pkt_sniffer:
                     self.trees_table[0][2] = 'LEAF'
                     self.node_label[0][2] = 'LEAF'
                     self.write_on_file('[INFO] Solo tengo un vecino y él me ha pasado la etiqueta: LEAF')
-                    #self.print_labels()
-                    #self.print_trees_table()
+                    self.print_labels()
+                    self.print_trees_table()
                     self.flag_init_load = True
                     self.comput_load_sharing()
 
@@ -868,8 +866,8 @@ class pkt_sniffer:
                     #print(self.main_labels)
                     self.trees_table[0][2] = 'LEAF'
                     self.node_label[0][2] = 'LEAF'
-                    #self.print_labels()
-                    #self.print_trees_table()
+                    self.print_labels()
+                    self.print_trees_table()
                     self.flag_init_load = True
                     self.comput_load_sharing()
 
@@ -984,14 +982,14 @@ class pkt_sniffer:
                     self.value_ant = value
                     #self.print_sons_table()
                     if self.node_ID != ID_ROOT:   #El ROOT no comparte, solo actualiza su valor
-                        #self.print_labels()
-                        #self.print_trees_table()
+                        self.print_labels()
+                        self.print_trees_table()
                         #if self.long_ant < len(self.sons_info):
                             #self.long_ant = len(self.sons_info)
-                        #self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
-                        #self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
+                        self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
+                        self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
                         #self.datos_almacenados[]
-                        #self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
+                        self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
                         self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])+abs(self.computational_load)
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
                         #self.write_on_file('[INFO] Paquete de carga enviado')
@@ -1073,11 +1071,11 @@ class pkt_sniffer:
                             data = struct.unpack("!2B1B8B1B", pkt[12:24])
                             self.process_propagation_pkt(data, pkt)
                         elif option == 3:
-                            #self.write_on_file('[INFO] -- Recibido LOAD --')
+                            self.write_on_file('[INFO] -- Recibido LOAD --')
                             data = struct.unpack("!1B1B" , pkt[15:17])
                             self.process_load_pkt(data, pkt)
                         elif option == 4:
-                            #self.write_on_file('[INFO] -- Recibido ACK --')
+                            self.write_on_file('[INFO] -- Recibido ACK --')
                             data = struct.unpack("!6B" , pkt[6:12])
                             mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
                             if mac_rcv == self.node_label[self.tree_index][4]:   #Recibido ACK de mi PADRE
@@ -1092,12 +1090,9 @@ class pkt_sniffer:
                                 self.datos_almacenados["load_time"]= round(self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"] - TIME_WAIT_ACK*1000000) #Restar tiempo wait ACK (1º intento)
                                 self.write_computing_info()
 
-            if self.timer_hello == 0 or self.timer_hello < round(datetime.datetime.timestamp(datetime.datetime.now())): #seconds
-                self.hello_loop()
-                self.timer_hello = round(datetime.datetime.timestamp(datetime.datetime.now()) + TIME_HELLO)
-
-
             for interface_writable in writable:
+                #self.write_on_file("Writeables:" +str(interface_writable))
+                #self.write_on_file("Writeables:" +str(self.message_queues.keys()))
                 #n_msg=len(self.message_queues[interface_writable])
                 '''for msg in range (0, n_msg):
                     print('Envio paquete %s' % self.message_queues[self.interface_name][msg])
@@ -1107,13 +1102,13 @@ class pkt_sniffer:
                 '''
                 if (interface_writable in self.message_queues):
                     for idx, msg in enumerate(self.message_queues[interface_writable]):
-                        #print('Envio paquete (id = %d ) -> %s' % (idx, msg))
+                        #print('Envio paquete %s' % msg)
                         #print(msg)
                         interface_writable.send(msg)
                         #self.message_queues[interface_writable].pop(idx) #nos cargamos ese mensaje
 
+                if (interface_writable in self.message_queues):
                     self.message_queues.pop(interface_writable, None) #nos cargamos ese mensaje
-
                 '''try:
                     if self.message_queues.has_key(interface_writable):
                         self.message_queues.pop(interface_writable,None)
@@ -1144,9 +1139,9 @@ pkt_sniff.print_sniffer_info()  #Info del socket abierto
 #Creacion del paquete HELLO
 pkt_sniff.pkt_creation(1) #Option=1 (HELLO INICIAL PARA DESCUBRIR VECINOS)
 # HELLO TIMER ENABLE
-#t_hello=threading.Thread(target=pkt_sniff.hello_loop)  #Envio hello pkt cada 5s
-#t_hello.daemon = True
-#t_hello.start()
+t_hello=threading.Thread(target=pkt_sniff.hello_loop)  #Envio hello pkt cada 5s
+t_hello.daemon = True
+t_hello.start()
 
 #t_expiration=threading.Thread(target=pkt_sniff.expiration_time)   #Comprobación caducidad tabla vecinos cada 1s
 #t_expiration.daemon = True
