@@ -13,12 +13,12 @@ import os
 import multiprocessing
 
 ETH_TYPE_CUSTOM = 65467 #valor del eth custom para hellos
-TIME_OUT = 1000
+TIME_OUT = 300
 NODE_NO_SDN = 2 #id del dispositivo switch no sdn
 TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
 TIME_INIT_PROPAGATION = 10
-TIME_DEDENNE = 5 #segundos
+TIME_DEDENNE = 7 #segundos
 #TIME_ACTIVE_LABEL = 12 #segundos
 MAX_DEDENNE_LABELS = 1 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
@@ -26,12 +26,16 @@ FLAG_LABELS_INFO = True
 DIGITOS_PREFIJO = 2
 FLAG_PREFIJO = True
 MAC_DST = 'FF:FF:FF:FF:FF:FF'
-ID_ROOT = 21
+FLAG_TOPO_FICHERO = True
+#ID_ROOT = 1
 FLAG_FILE = True
-PATH = './Logs/'
-TIME_INIT_LOAD = 30
-TIME_WAIT_ACK = 1
-
+PATH = '/home/arppath/TFM/Logs/'
+#TIME_INIT_LOAD = 30
+#TIME_WAIT_ACK = 2
+#FICHERO_TOPO = '/home/arppath/TFM/Topologias/Pruebas-protocolo/Leizpiz/60/Leizpiz_60_7'
+#FICHERO_TOPO = '/home/arppath/TFM/Topologias/4_nodos.txt'
+FICHERO_TOPO = sys.argv[1]
+FLAG_10_ITERACION = True
 ###############################################################################################################################################################################################
 def handler(signum, frame):  #Kill all threads
     sys.exit()
@@ -73,6 +77,9 @@ class pkt_sniffer:
         self.datos_almacenados = dict()  #Almacenamiento datos en fichero de resultados
         ###########################################
         self.timer_hello = 0
+        self.timer_label = 0
+        self.it_hello = 0
+        self.escrito_fichero=0
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -90,16 +97,30 @@ class pkt_sniffer:
         self.inputs.append(new_socket)
         self.node_ID = int(re.findall('[0-9]+', interface_name)[0])
         self.log_file = PATH + 'log_sta%d.txt' % self.node_ID
+        os.system('touch log_sta%d.txt' % self.node_ID)
 
         if self.node_ID == ID_ROOT:  #Se define root
             self.node_label = [['1', '-', 'PARENT', 'Yes', '-']]
-            os.system('rm -f ./Logs/*')
+            #os.system('rm -f /home/arppath/TFM/Logs/*')
             #f=open(PATH+'computing_info.txt','w')
             #f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
             #f.write('------------------------------------------------------------------------------\n')
             #f.close()
         else:
-            self.computational_load = random.randint(-10,10)
+            if FLAG_TOPO_FICHERO:
+                i=1
+                file=open(FICHERO_TOPO,'r')
+                for line in file:
+                    line=line[0:len(line)-1]
+                    elem=line.split(',')
+                    if i == self.node_ID:
+                        #self.write_on_file(elem)
+                        self.computational_load = int(elem[3])
+                        self.write_on_file('[INFO] Carga del nodo obtenida del fichero: %d' % self.computational_load)
+                    i+=1
+                file.close()
+            else:
+                self.computational_load = random.randint(-10,10)
 
         if not new_socket in self.message_queues.keys():
                 self.message_queues[new_socket] = []
@@ -174,8 +195,15 @@ class pkt_sniffer:
 
             if self.node_ID == ID_ROOT:
                 if self.iteration >= 1:
-                    os.system('cat ./Logs/linea_sta* >> ./Logs/info_it_%d.txt' % (self.iteration-1))
-                    os.system('rm ./Logs/linea_sta*')
+                    os.system('cat /home/arppath/TFM/Logs/linea_sta* >> /home/arppath/TFM/Logs/info_it_%d.txt' % (self.iteration-1))
+                    os.system('rm /home/arppath/TFM/Logs/linea_sta*')
+                if self.iteration == 2:
+                    if FLAG_10_ITERACION:
+                        #time.sleep(1)
+                        #index=int(FICHERO_TOPO.split('_')[3])
+                        #os.system('cp /home/arppath/TFM/Logs/info_it_0.txt %s_results/it_%d' % (FICHERO_TOPO,index))
+                        #os.system('chmod 777 %s_results/*' %FICHERO_TOPO)
+                        sys.exit()
 
                 now = datetime.datetime.now()
                 self.time_stamp = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
@@ -212,6 +240,8 @@ class pkt_sniffer:
                 self.datos_almacenados["abs_load_balance"] = 0
                 self.datos_almacenados["t_stamp_ultimo_hijo"] = 0
                 self.datos_almacenados["abs_load_balance_list"] = []
+                self.datos_almacenados["children_list"]=[]
+                self.escrito_fichero=0
                 ###########################################
 
             timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
@@ -300,13 +330,14 @@ class pkt_sniffer:
             self.datos_almacenados["load_balance"] = self.computational_load+valor
             self.datos_almacenados["n_LOAD_pkt"] += 1
             self.datos_almacenados["n_total_LOAD_pkt"] +=1
+            #self.write_on_file('[INFO] Paquete de carga generado y puesto en cola')
 
             #self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))  #Hilo de espera de 1s para recepción de ACK
-            if not self.timer_ACK:
-                self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))
+            #if not self.timer_ACK:
+                #self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))
                 #self.timer_ACK.daemon = True
-                self.timer_ACK.start()
-                self.write_on_file('[INFO] Iniciado timer de ACK')
+                #self.timer_ACK.start()
+                #self.write_on_file('[INFO] Iniciado timer de ACK')
 
         if option == 4:
             pkt = cabecera
@@ -315,36 +346,40 @@ class pkt_sniffer:
             #print(self.message_queues)
             self.datos_almacenados["n_ACK_pkt"] += 1
             self.datos_almacenados["n_total_LOAD_pkt"] += 1
-            self.write_on_file('[INFO] ACK en cola de salida hacia MAC %s' % src)
+            #self.write_on_file('[INFO] ACK en cola de salida hacia MAC %s' % src)
 
 ###############################################################################################################################################################################################
-    def wait_ACK(self, pkt):
+    #def wait_ACK(self, pkt):
         #while(1):
-        time.sleep(TIME_WAIT_ACK)
-        if not self.flag_ACK:
-            self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
+        #time.sleep(TIME_WAIT_ACK)
+        #if not self.flag_ACK:
+            #self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
             #self.send_pkt(pkt)
             ########################
             #SIN REENVIO POR AHORA
-            self.pkt_creation(3)   #SEND LOAD FRAME
+            #self.pkt_creation(3)   #SEND LOAD FRAME
             ########################
-            self.datos_almacenados["retries"] += 1
+            #self.datos_almacenados["retries"] += 1
+            #sys.exit()
             #break
 
 ###############################################################################################################################################################################################
     def write_on_file(self,line):
         if FLAG_FILE:
             f=open(self.log_file,'a')
-            f.write(line+'\n')
+            f.write(str(line)+'\n')
             f.close()
         else:
-            print(line)
+            print(str(line))
 
 ###############################################################################################################################################################################################
     def write_computing_info(self):
         #f=open(PATH+'computing_info_it_%d.txt' % (self.iteration-1),'a')
         #f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format(self.interface_name.split('-')[0], node_type, self.computational_load, str(self.trees_table[self.tree_index][3]), str(power), self.computational_load+value))
         #f.close()
+        #if self.escrito_fichero == 0:
+            #self.write_on_file('[INFO] ESCRIBIENDO EN FICHERO')
+        #self.escrito_fichero=1
         #f=open(PATH+'info_it_%d.txt' % (self.iteration-1),'a+')
         f=open(PATH+'linea_sta%d.txt' % (self.node_ID),'w')
         f.write("{:<3} {:<3} {:<10} {:<3} {:<3} {:<3} {:<3} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format(self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["time_ID"], self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"], self.datos_almacenados["load_time"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"], self.datos_almacenados["init_node_load"],self.datos_almacenados["load_balance"], self.datos_almacenados["abs_load_balance"]))
@@ -360,6 +395,9 @@ class pkt_sniffer:
                     self.message_queues[interface] = []
 
             self.message_queues[interface].append(pkt)
+            #self.write_on_file('[INFO] Nuevo paquete encolado: %s' % pkt)
+            #self.write_on_file('[INFO] N mensajes en cola %d' % len(self.message_queues[interface]))
+
 
 ###############################################################################################################################################################################################
     def hello_loop(self): #Enviar el pkt
@@ -624,11 +662,13 @@ class pkt_sniffer:
             self.long_ant = 0
             self.value_ant = None
             self.flag_ACK = False
-            self.computational_load = random.randint(-10,10) #Nuevo valor de carga para la iteración
+            self.escrito_fichero=0
+            if self.iteration >= 1:
+                self.computational_load = random.randint(-10,10) #Nuevo valor de carga para la iteración
             self.write_on_file('\n---------------------------------------------------------')
             self.write_on_file('---    Nueva iteración: %d    ---' %self.iteration)
             self.write_on_file('---------------------------------------------------------')
-            print('[INFO] Nueva carga para nodo: %d' % self.computational_load)
+            #print('[INFO] Nueva carga para nodo: %d' % self.computational_load)
 
             #f=open(PATH+'computing_info_it_%d.txt' % self.iteration,'w')
             #f.write("{:<10} {:<10} {:<10} {:<20} {:<20} {:<12}\n".format('Node name', 'Node type', 'Node load', 'Children ID', 'Children load', 'Node balance'))
@@ -641,9 +681,9 @@ class pkt_sniffer:
             f.write('-----------------------------------------------------------------------------------------\n')
             f.close()
 
-            if self.timer_ACK:
-                self.timer_ACK.join()
-                self.timer_ACK = None
+            #if self.timer_ACK:
+            #    self.timer_ACK.join()
+            #    self.timer_ACK = None
             self.iteration += 1
             self.t_stamp_hijo = 0
             self.abs_load_balance = 0
@@ -662,6 +702,7 @@ class pkt_sniffer:
             self.datos_almacenados["t_stamp_hijo"] = 0
             self.datos_almacenados["t_stamp_ultimo_hijo"] = 0
             self.datos_almacenados["abs_load_balance_list"] = []
+            self.datos_almacenados["children_list"]=[]
             ###########################################
 
         data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[24:(24+long_HLMAC)+1])
@@ -696,6 +737,7 @@ class pkt_sniffer:
                 #print('main_labels: %s' % self.main_labels)
                 now = datetime.datetime.now()
                 self.datos_almacenados["last_ID_time"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                #self.write_on_file(self.main_labels)
 
             data = struct.unpack("!6B", pkt[6:12])
             #mac_src = data[0:6]
@@ -911,7 +953,13 @@ class pkt_sniffer:
         abs_value_rcv=int(abs_value_rcv,16)
 
         #if self.node_ID == ID_ROOT:
-        self.datos_almacenados["abs_load_balance_list"].append(abs_value_rcv)
+        if mac_rcv not in self.datos_almacenados["children_list"]:
+            self.datos_almacenados["children_list"].append(mac_rcv)
+            self.datos_almacenados["abs_load_balance_list"].append(abs_value_rcv)
+        else:
+            c = self.datos_almacenados["children_list"].index(mac_rcv)
+            self.datos_almacenados["abs_load_balance_list"][c]=abs_value_rcv
+
         #self.write_on_file(self.datos_almacenados["abs_load_balance_list"])
 
         time_stamp_rcv='0x%s%s%s%s%s%s%s%s' % (format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'),format(data[6], '02x'),format(data[7], '02x'),format(data[8], '02x'),format(data[9], '02x'))
@@ -988,10 +1036,10 @@ class pkt_sniffer:
                         #self.print_trees_table()
                         #if self.long_ant < len(self.sons_info):
                             #self.long_ant = len(self.sons_info)
-                        #self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
-                        #self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
+                        self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
+                        self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
                         #self.datos_almacenados[]
-                        #self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
+                        self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
                         self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])+abs(self.computational_load)
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
                         #self.write_on_file('[INFO] Paquete de carga enviado')
@@ -1019,8 +1067,14 @@ class pkt_sniffer:
                         self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])
                         self.datos_almacenados["load_time"] = round(current_time - self.datos_almacenados["t_stamp_hijo"])
                         self.write_computing_info()
-
-                        self.computational_load=0
+                        now = datetime.datetime.now()
+                        self.write_on_file('[INFO] Escrito en el fichero')
+                        self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
+                        #sys.exit()
+                        #os.system('cat ./Logs/linea_sta* >> ./Logs/info_it_%d.txt' % (self.iteration-1))
+                        #os.system('rm ./Logs/linea_sta*')
+                        #sys.exit()
+                        #self.computational_load=0
                         #print(self.sons_info)
                         #for son in self.sons_info:
                         #    son[2] = 0
@@ -1029,23 +1083,23 @@ class pkt_sniffer:
 
 ###############################################################################################################################################################################################
     def init_propagation(self):
-        time.sleep(TIME_INIT_PROPAGATION)
+        #time.sleep(TIME_INIT_PROPAGATION)
         if self.trees_table == []:
             self.trees_table.append(['1','MAIN','PARENT',[]])
-        while(1):
-            #if self.node_ID == ID_ROOT:  #NODO ROOT
-                #if self.flag_init_propagation:
-            self.pkt_creation(2,self.node_label[0]) #Option=1 (Dedenne)
-            #print(self.label_propagation_packet)
-            #self.write_on_file('[INFO] Iniciado propagación etiquetas')
-            self.send_pkt(self.label_propagation_packet)
-            self.datos_almacenados["n_ID_pkt"] += 1
-            time.sleep(TIME_DEDENNE)
+        #while(1):
+        #if self.node_ID == ID_ROOT:  #NODO ROOT
+            #if self.flag_init_propagation:
+        self.pkt_creation(2,self.node_label[0]) #Option=1 (Dedenne)
+        #print(self.label_propagation_packet)
+        #self.write_on_file('[INFO] Iniciado propagación etiquetas')
+        self.send_pkt(self.label_propagation_packet)
+        self.datos_almacenados["n_ID_pkt"] += 1
+        #time.sleep(TIME_DEDENNE)
 
 ###############################################################################################################################################################################################
     def recv(self):
         while True:
-            readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs, self.timeout/1000)
+            readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs, TIME_OUT/1000)
 
             for interface_readable in readable:
                     pkt, sa_ll = interface_readable.recvfrom(MTU)
@@ -1077,56 +1131,125 @@ class pkt_sniffer:
                             data = struct.unpack("!1B1B" , pkt[15:17])
                             self.process_load_pkt(data, pkt)
                         elif option == 4:
-                            #self.write_on_file('[INFO] -- Recibido ACK --')
+                            self.write_on_file('[INFO] -- Recibido ACK --')
                             data = struct.unpack("!6B" , pkt[6:12])
                             mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
                             if mac_rcv == self.node_label[self.tree_index][4]:   #Recibido ACK de mi PADRE
                                 self.flag_ACK = True
                                 self.write_on_file('[INFO] ACK recibido del nodo PADRE con MAC %s' % mac_rcv)
-                                if self.timer_ACK:
-                                    self.timer_ACK.join()
-                                    self.timer_ACK = None
+                                #if self.timer_ACK:
+                                #    self.timer_ACK.join()
+                                #    self.timer_ACK = None
                                 now = datetime.datetime.now()
                                 self.datos_almacenados["t_ACK_parent"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us  #en us
                                 #self.write_on_file('ACK %d | Load %d | diff %d' % (self.datos_almacenados["t_ACK_parent"],self.datos_almacenados["t_stamp_hijo"], self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]))
-                                self.datos_almacenados["load_time"]= round(self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"] - TIME_WAIT_ACK*1000000) #Restar tiempo wait ACK (1º intento)
+                                #self.datos_almacenados["load_time"]= round(self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"] - TIME_WAIT_ACK*1000000) #Restar tiempo wait ACK (1º intento)
+                                self.datos_almacenados["load_time"]= round(self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]) #Restar tiempo wait ACK (1º intento)
                                 self.write_computing_info()
+                                now = datetime.datetime.now()
+                                self.write_on_file('[INFO] Escrito en el fichero')
+                                self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
 
+                                if self.iteration == 2:
+                                    if FLAG_10_ITERACION:
+                                        sys.exit()
+
+            ###################################################################################################################################################
+            #BUCLE HELLO PERIODICO
             if self.timer_hello == 0 or self.timer_hello < round(datetime.datetime.timestamp(datetime.datetime.now())): #seconds
                 self.hello_loop()
                 self.timer_hello = round(datetime.datetime.timestamp(datetime.datetime.now()) + TIME_HELLO)
-
+                self.it_hello += 1
+            ###################################################################################################################################################
+            #BUCLE ITERACIONES ETIQUETAS SOLO PARA ROOT
+            if self.node_ID == ID_ROOT:
+                if self.it_hello > 3:
+                    if self.timer_label == 0 or self.timer_label < round(datetime.datetime.timestamp(datetime.datetime.now())): #seconds
+                        self.init_propagation()
+                        self.timer_label = round(datetime.datetime.timestamp(datetime.datetime.now()) + TIME_DEDENNE)
+            ###################################################################################################################################################
 
             for interface_writable in writable:
-                #n_msg=len(self.message_queues[interface_writable])
-                '''for msg in range (0, n_msg):
-                    print('Envio paquete %s' % self.message_queues[self.interface_name][msg])
-                    interface_writable.send(self.message_queues[self.interface_name][msg])
-                    self.message_queues[self.interface_name].pop(msg) #nos cargamos ese mensaje
-                #self.message_queues[self.interface_name]=self.message_queues[self.interface_name][n_msg:]
-                '''
                 if (interface_writable in self.message_queues):
+                    #self.write_on_file('[INFO] N mensajes a mandar %d' % len(self.message_queues[interface_writable]))
                     for idx, msg in enumerate(self.message_queues[interface_writable]):
                         #print('Envio paquete (id = %d ) -> %s' % (idx, msg))
                         #print(msg)
                         interface_writable.send(msg)
+                        #self.write_on_file('[INFO] Mensaje enviado')
+                        #self.write_on_file('[INFO] Paquete enviado %d' % idx)
                         #self.message_queues[interface_writable].pop(idx) #nos cargamos ese mensaje
-
+                    #self.write_on_file('[INFO] N mensajes después de enviar %d' % len(self.message_queues[interface_writable]))
                     self.message_queues.pop(interface_writable, None) #nos cargamos ese mensaje
+                    #self.write_on_file('[INFO] COLA LIMPIA: %s' % self.message_queues)
+            '''
+            for interface_writable in writable:
+                #n_msg=len(self.message_queues[interface_writable])
+                for msg in range (0, n_msg):
+                    print('Envio paquete %s' % self.message_queues[self.interface_name][msg])
+                    interface_writable.send(self.message_queues[self.interface_name][msg])
+                    self.message_queues[self.interface_name].pop(msg) #nos cargamos ese mensaje
+                #self.message_queues[self.interface_name]=self.message_queues[self.interface_name][n_msg:]
 
-                '''try:
+                if (interface_writable in self.message_queues):
+                    self.write_on_file('[INFO] N mensajes a mandar %d' % len(self.message_queues[interface_writable]))
+                    for idx, msg in enumerate(self.message_queues[interface_writable]):
+                        #print('Envio paquete (id = %d ) -> %s' % (idx, msg))
+                        #print(msg)
+                        interface_writable.send(msg)
+                        self.write_on_file('[INFO] Paquete enviado %d' % idx)
+                        #self.message_queues[interface_writable].pop(idx) #nos cargamos ese mensaje
+                    self.write_on_file('[INFO] N mensajes después de enviar %d' % len(self.message_queues[interface_writable]))
+                    self.message_queues.pop(interface_writable, None) #nos cargamos ese mensaje
+                    self.write_on_file('[INFO] COLA LIMPIA: %s' % self.message_queues)
+
+
+                try:
                     if self.message_queues.has_key(interface_writable):
                         self.message_queues.pop(interface_writable,None)
 
                     if interface_writable in self.outputs:
                         self.outputs.remove(interface_writable)
                 except Exception as exception:
-                    continue '''
-
+                    continue
+            '''
+    '''
+    def mandar_cte(self):
+        while True:
+            readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs, TIME_OUT/1000)
+            for interface_writable in writable:
+                if (interface_writable in self.message_queues):
+                    #self.write_on_file('[INFO] N mensajes a mandar %d' % len(self.message_queues[interface_writable]))
+                    for idx, msg in enumerate(self.message_queues[interface_writable]):
+                        #print('Envio paquete (id = %d ) -> %s' % (idx, msg))
+                        #print(msg)
+                        interface_writable.send(msg)
+                        #self.write_on_file('[INFO] Mensaje enviado')
+                        #self.write_on_file('[INFO] Paquete enviado %d' % idx)
+                        #self.message_queues[interface_writable].pop(idx) #nos cargamos ese mensaje
+                    #self.write_on_file('[INFO] N mensajes después de enviar %d' % len(self.message_queues[interface_writable]))
+                    self.message_queues.pop(interface_writable, None) #nos cargamos ese mensaje
+                    #self.write_on_file('[INFO] COLA LIMPIA: %s' % self.message_queues)
+    '''
 ###############################################################################################################################################################################################
 
 
 ###############################################################################################################################################################################################
+
+#sta=[]
+
+if FLAG_TOPO_FICHERO:
+    file=open(FICHERO_TOPO,'r')
+    i=1
+    global ID_ROOT
+    for line in file:
+        line=line[0:len(line)-1]
+        elem=line.split(',')
+        if elem[4] == '1':
+            ID_ROOT = i
+        i+=1
+    file.close()
+
 pkt_sniff = pkt_sniffer()
 
 #OBTENER INTERFACES
@@ -1153,16 +1276,20 @@ pkt_sniff.pkt_creation(1) #Option=1 (HELLO INICIAL PARA DESCUBRIR VECINOS)
 #t_expiration.start()
 
 # HLMAC TIMER ENABLE
-if pkt_sniff.get_node_ID() == ID_ROOT:
-    t_dedenne=threading.Thread(target=pkt_sniff.init_propagation)   #Hilo ejecución Dedenne
-    t_dedenne.daemon = True
-    t_dedenne.start()
+#if pkt_sniff.get_node_ID() == ID_ROOT:
+#    t_dedenne=threading.Thread(target=pkt_sniff.init_propagation)   #Hilo ejecución Dedenne
+#    t_dedenne.daemon = True
+#    t_dedenne.start()
 
 #t_load=threading.Thread(target=pkt_sniff.comput_load_sharing)   #Proceso compartición carga iniciado por LEAFs
 #t_load.daemon = True
 #t_load.start()
 
 signal.signal(signal.SIGINT, handler)
+
+#t_expiration=threading.Thread(target=pkt_sniff.mandar_cte)   #Comprobación caducidad tabla vecinos cada 1s
+#t_expiration.daemon = True
+#t_expiration.start()
 
 #Bucle recepción mensajes
 pkt_sniff.recv()    #MAIN PROGRAM
