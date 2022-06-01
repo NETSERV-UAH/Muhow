@@ -35,7 +35,7 @@ PATH = '/home/arppath/TFM/Logs/'
 #FICHERO_TOPO = '/home/arppath/TFM/Topologias/Pruebas-protocolo/Leizpiz/60/Leizpiz_60_7'
 #FICHERO_TOPO = '/home/arppath/TFM/Topologias/4_nodos.txt'
 FICHERO_TOPO = sys.argv[1]
-FLAG_10_ITERACION = True
+FLAG_10_ITERACION = False
 ###############################################################################################################################################################################################
 def handler(signum, frame):  #Kill all threads
     sys.exit()
@@ -197,7 +197,7 @@ class pkt_sniffer:
                 if self.iteration >= 1:
                     os.system('cat /home/arppath/TFM/Logs/linea_sta* >> /home/arppath/TFM/Logs/info_it_%d.txt' % (self.iteration-1))
                     os.system('rm /home/arppath/TFM/Logs/linea_sta*')
-                if self.iteration == 2:
+                if self.iteration == 12:
                     if FLAG_10_ITERACION:
                         #time.sleep(1)
                         #index=int(FICHERO_TOPO.split('_')[3])
@@ -242,6 +242,10 @@ class pkt_sniffer:
                 self.datos_almacenados["abs_load_balance_list"] = []
                 self.datos_almacenados["children_list"]=[]
                 self.escrito_fichero=0
+                self.datos_almacenados["time_1_ID"]= 0
+                self.datos_almacenados["time_1_pkt_load"]= 0
+                self.datos_almacenados["time_last_ACK"]= 0
+
                 ###########################################
 
             timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
@@ -382,7 +386,7 @@ class pkt_sniffer:
         #self.escrito_fichero=1
         #f=open(PATH+'info_it_%d.txt' % (self.iteration-1),'a+')
         f=open(PATH+'linea_sta%d.txt' % (self.node_ID),'w')
-        f.write("{:<3} {:<3} {:<10} {:<3} {:<3} {:<3} {:<3} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format(self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["time_ID"], self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"], self.datos_almacenados["load_time"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"], self.datos_almacenados["init_node_load"],self.datos_almacenados["load_balance"], self.datos_almacenados["abs_load_balance"]))
+        f.write("{:<3} {:<3} {:<8} {:<10}{:<3} {:<3} {:<3} {:<3} {:<10}{:<11} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format(self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["time_ID"],self.datos_almacenados["time_1_ID"], self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"],self.datos_almacenados["load_time"], self.datos_almacenados["time_1_pkt_load"], self.datos_almacenados["time_last_ACK"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"],self.datos_almacenados["init_node_load"],self.datos_almacenados["load_balance"], self.datos_almacenados["abs_load_balance"]))
         #f.write("%d   %d   %d   %d   %d   %d   %d   %d   %d   %d\n" % (self.datos_almacenados["node"], self.datos_almacenados["type"],self.datos_almacenados["n_ID_pkt"],self.datos_almacenados["n_LOAD_pkt"], self.datos_almacenados["n_ACK_pkt"], self.datos_almacenados["n_total_LOAD_pkt"], self.datos_almacenados["retries"], self.datos_almacenados["total_time"], self.datos_almacenados["load_balance"], self.datos_almacenados["init_node_load"]))
         f.close()
 
@@ -527,6 +531,14 @@ class pkt_sniffer:
         self.datos_almacenados["t_stamp_hijo"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
         self.datos_almacenados["abs_load_balance"] = abs(self.computational_load)
         self.pkt_creation(3)
+
+        ##### TIEMPO DE 1 PKT DE CARGA MANDADA #####
+        if self.datos_almacenados["time_1_pkt_load"] == 0:
+            now = datetime.datetime.now()
+            current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+            self.datos_almacenados["time_1_pkt_load"]= round(current_time-self.datos_almacenados["root_time"])
+        ############################################
+
         #now = datetime.datetime.now()
         #print ("Fin envio paquete de carga : ")
         #print (now.strftime("%Y-%m-%d %H:%M:%S"))
@@ -668,6 +680,8 @@ class pkt_sniffer:
             self.write_on_file('\n---------------------------------------------------------')
             self.write_on_file('---    Nueva iteración: %d    ---' %self.iteration)
             self.write_on_file('---------------------------------------------------------')
+
+
             #print('[INFO] Nueva carga para nodo: %d' % self.computational_load)
 
             #f=open(PATH+'computing_info_it_%d.txt' % self.iteration,'w')
@@ -677,8 +691,8 @@ class pkt_sniffer:
 
             f=open(PATH+'info_it_%d.txt' % self.iteration,'w')
             #f.write('')
-            f.write("{:<3} {:<3} {:<10} {:<3} {:<3} {:<3} {:<3} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format('Nod', 'Typ','Time_ID', 'nID','nLO', 'nAC', 'nTL', 'Time_load', 'nRE', 'Time_Total', 'iLoad','l_bal', 'ab_ba'))
-            f.write('-----------------------------------------------------------------------------------------\n')
+            f.write("{:<3} {:<3} {:<8} {:<10}{:<3} {:<3} {:<3} {:<3} {:<10}{:<10} {:<10} {:<3} {:<10} {:<5} {:<5} {:<5}\n".format('Nod', 'Typ','Time_ID', 'Time_1_ID', 'nID','nLO', 'nAC', 'nTL', 'Time_load', 'Time_1_load', 'Time_l_ACK' ,'nRE', 'Time_Total', 'iLoad','l_bal', 'ab_ba'))
+            f.write('---------------------------------------------------------------------------------------------------------------\n')
             f.close()
 
             #if self.timer_ACK:
@@ -703,6 +717,11 @@ class pkt_sniffer:
             self.datos_almacenados["t_stamp_ultimo_hijo"] = 0
             self.datos_almacenados["abs_load_balance_list"] = []
             self.datos_almacenados["children_list"]=[]
+            self.datos_almacenados["time_1_ID"]= 0
+            self.datos_almacenados["time_1_pkt_load"]= 0
+            self.datos_almacenados["time_last_ACK"]= 0
+            ###########################################
+            self.write_computing_info()
             ###########################################
 
         data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[24:(24+long_HLMAC)+1])
@@ -875,6 +894,13 @@ class pkt_sniffer:
                         else:
                             self.trees_table.append([label_new_2, '-','UNDEFINED',[]])
                         self.write_on_file('[INFO] Nueva HLMAC añadida: %s' % label_new_2)
+
+                        ##### TIEMPO DE 1º ID #####
+                        now = datetime.datetime.now()
+                        current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                        self.datos_almacenados["time_1_ID"]= round(current_time-self.datos_almacenados["root_time"])
+                        ###########################
+
                         #self.print_trees_table()
                         #GENERO MENSAJE Y LO ENVÍO CON label_new_2
                         for label in self.node_label:
@@ -887,6 +913,7 @@ class pkt_sniffer:
                 if flag_exite_dedenne and self.trees_table == []:
                     self.trees_table.append([self.node_label[0][0], 'MAIN','UNDEFINED',[]])
                     self.write_on_file('[INFO] Nueva entrada añadida: %s' % label_new_2)
+
                     #self.print_trees_table()
 
                 #self.write_on_file('ETIQUETAS RECIBIDAS DEL ARBOL PRINCIPAL %s ' % self.main_labels)
@@ -945,6 +972,12 @@ class pkt_sniffer:
         self.write_on_file('[INFO] Recibido paquete de carga con MAC_src %s' % mac_rcv)
 
         self.pkt_creation(4,[],0,0,mac_rcv)    #ACK
+
+        ##### TIEMPO DE ULTIMO ACK #####
+        now = datetime.datetime.now()
+        current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+        self.datos_almacenados["time_last_ACK"]= round(current_time-self.datos_almacenados["root_time"])
+        ################################
 
         data = struct.unpack("!2B8B", pkt[17:27])   #Comprobación OPTION
         abs_value = [hex(int(data[x])) for x in range(0,2)] #Comprobación ETH_TYPE
@@ -1042,6 +1075,14 @@ class pkt_sniffer:
                         self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
                         self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])+abs(self.computational_load)
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
+
+                        ##### TIEMPO DE 1 PKT DE CARGA MANDADA #####
+                        if self.datos_almacenados["time_1_pkt_load"] == 0:
+                            now = datetime.datetime.now()
+                            current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                            self.datos_almacenados["time_1_pkt_load"]= round(current_time-self.datos_almacenados["root_time"])
+                        ############################################
+
                         #self.write_on_file('[INFO] Paquete de carga enviado')
                         #self.write_computing_info('PARENT',power, value)
                         self.datos_almacenados["time_ID"] = self.datos_almacenados["last_ID_time"] - self.datos_almacenados["root_time"]
@@ -1150,7 +1191,7 @@ class pkt_sniffer:
                                 self.write_on_file('[INFO] Escrito en el fichero')
                                 self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
 
-                                if self.iteration == 2:
+                                if self.iteration == 12:
                                     if FLAG_10_ITERACION:
                                         sys.exit()
 
