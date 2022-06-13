@@ -28,7 +28,7 @@ FLAG_PREFIJO = True
 MAC_DST = 'FF:FF:FF:FF:FF:FF'
 FLAG_TOPO_FICHERO = True
 #ID_ROOT = 1
-FLAG_FILE = True
+FLAG_FILE = False
 PATH = '/home/arppath/TFM/Logs/'
 #TIME_INIT_LOAD = 30
 #TIME_WAIT_ACK = 2
@@ -36,6 +36,8 @@ PATH = '/home/arppath/TFM/Logs/'
 #FICHERO_TOPO = '/home/arppath/TFM/Topologias/4_nodos.txt'
 FICHERO_TOPO = sys.argv[1]
 FLAG_10_ITERACION = False
+CRITERIO_ETIQUETAS = int(sys.argv[2]) #0-> 1º en llegar / 1-> Etiqueta más corta
+
 ###############################################################################################################################################################################################
 def handler(signum, frame):  #Kill all threads
     sys.exit()
@@ -80,6 +82,8 @@ class pkt_sniffer:
         self.timer_label = 0
         self.it_hello = 0
         self.escrito_fichero=0
+        self.primero=0
+        self.flag_cambio=False
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -96,8 +100,9 @@ class pkt_sniffer:
         self.node_mac=mac_interface
         self.inputs.append(new_socket)
         self.node_ID = int(re.findall('[0-9]+', interface_name)[0])
-        self.log_file = PATH + 'log_sta%d.txt' % self.node_ID
-        os.system('touch log_sta%d.txt' % self.node_ID)
+        if FLAG_FILE:
+            self.log_file = PATH + 'log_sta%d.txt' % self.node_ID
+            os.system('touch %s' % self.log_file)
 
         if self.node_ID == ID_ROOT:  #Se define root
             self.node_label = [['1', '-', 'PARENT', 'Yes', '-']]
@@ -116,7 +121,7 @@ class pkt_sniffer:
                     if i == self.node_ID:
                         #self.write_on_file(elem)
                         self.computational_load = int(elem[3])
-                        self.write_on_file('[INFO] Carga del nodo obtenida del fichero: %d' % self.computational_load)
+                        #self.write_on_file('[INFO] Carga del nodo obtenida del fichero: %d' % self.computational_load)
                     i+=1
                 file.close()
             else:
@@ -373,8 +378,8 @@ class pkt_sniffer:
             f=open(self.log_file,'a')
             f.write(str(line)+'\n')
             f.close()
-        else:
-            print(str(line))
+        #else:
+        #    print(str(line))
 
 ###############################################################################################################################################################################################
     def write_computing_info(self):
@@ -701,6 +706,8 @@ class pkt_sniffer:
             self.iteration += 1
             self.t_stamp_hijo = 0
             self.abs_load_balance = 0
+            self.primero=0
+            self.flag_cambio=False
             ###########################################
             self.datos_almacenados = dict()  #Reinicio de datos almacenados para la siguiente iteracion
             self.datos_almacenados["node"] = self.node_ID
@@ -720,8 +727,6 @@ class pkt_sniffer:
             self.datos_almacenados["time_1_ID"]= 0
             self.datos_almacenados["time_1_pkt_load"]= 0
             self.datos_almacenados["time_last_ACK"]= 0
-            ###########################################
-            self.write_computing_info()
             ###########################################
 
         data = struct.unpack("!%dB" % (long_HLMAC+1), pkt[24:(24+long_HLMAC)+1])
@@ -747,222 +752,508 @@ class pkt_sniffer:
             except Exception as exception:
                 continue
 
+        data_src = struct.unpack("!6B", pkt[6:12])
+        mac_src='%s:%s:%s:%s:%s:%s' % (format(data_src[0], '02x'),format(data_src[1], '02x'),format(data_src[2], '02x'),format(data_src[3], '02x'),format(data_src[4], '02x'),format(data_src[5], '02x'))
+        #print('mac_src %s ' %mac_src)
+        id_src=0
+        for neigh in self.info_neighbours:
+           if neigh[0] == mac_src:
+               id_src=neigh[1]
+               break
+        #print('id src %d' % id_src)
+
         if mac_rcv == self.node_mac:   #I AM IN THE NEIGHBOUR LIST
             id_node=data[6]
             label_new_2='%s%s' % (label_new,id_node)
 
+            self.flag_cambio=False
             if flag_main_tree:   #ALMACENAR ETIQUETAS DEL CAMINO PRINCIPAL PARA LUEGO DEDICIR SI LEAF
-                self.main_labels.append(label_new_2)
+                if CRITERIO_ETIQUETAS == 0:
+                    if not label_new_2 in self.main_labels:
+                        self.main_labels.append(label_new_2)
+
+                ############################################
+                if CRITERIO_ETIQUETAS == 1:
+                    for info_etiq in self.main_labels:
+                        if info_etiq[0] == label_new_2:   #Si la etiqueta ya existe no hago nada (pueden volver por propagación de vecinos ante cambio)
+                            self.flag_cambio=True
+                        elif info_etiq[1] == id_src and info_etiq[0] != label_new_2:  #Si se ha registrado al nodo pero ha cambiado la etiqueta
+                            self.write_on_file('[INFO] Se ha detectado un cambio de etiqueta del vecino con ID %d' % id_src)
+                            info_etiq[0]=label_new_2
+                            self.flag_cambio=True
+                            self.flag_init_load = False #Para que vuelva a iniciar el proceso de carga
+
+                            #BORRAR TODA LA INFORMACIÓN DONDE ESTUVIERA EL VECINO CON INFO ANTERIOR POR ID (trees_table y sons_info)
+                            #sons_info:
+                            #self.print_sons_table()
+                            for hijo in self.sons_info:
+                                if hijo[0] == id_src:
+                                    self.sons_info.remove(hijo)
+                                    self.write_on_file('[INFO] Se ha eliminado al hijo con ID %d de sons_info' % id_src)
+                                    break
+                            #self.print_sons_table()
+
+                            #trees_table
+                            #self.print_trees_table()
+                            for entry in self.trees_table:
+                                if id_src in entry[3]: #En lista de hijos
+                                    entry[3].remove(id_src)
+                                    self.write_on_file('[INFO] Se ha eliminado al hijo con ID %d de trees_table' % id_src)
+                                if len(entry[3]) == 0:
+                                    self.write_on_file('[INFO] Cambio estado de nodo a UNDEFINED por perder todos los hijos')
+                                    entry[2]='UNDEFINED'  #Cambia estado hasta volver a detectar hijos o borde
+                                    self.node_label[0][2]='UNDEFINED' #node_label
+                                    #self.print_trees_table()
+                                    #self.print_labels()
+
+                            self.pkt_creation(2,self.node_label[0])
+                            break
+                    if not self.flag_cambio:
+                        self.main_labels.append([label_new_2, id_src])
+                ############################################
+
                 #print('main_labels: %s' % self.main_labels)
                 now = datetime.datetime.now()
                 self.datos_almacenados["last_ID_time"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
-                #self.write_on_file(self.main_labels)
+                self.write_on_file(self.main_labels)
 
-            data = struct.unpack("!6B", pkt[6:12])
+            #data = struct.unpack("!6B", pkt[6:12])
             #mac_src = data[0:6]
-            mac_src='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
+            #mac_src='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
 
-            flag_exite_dedenne = False
-            if self.node_ID != ID_ROOT:
-                for label in self.node_label:
-                    long = len(label_new)
-                    if (long > len(label[0][0:len(label_new)])):
-                        long = len(label[0][0:len(label_new)])
+            #######################################################################################################
+            if CRITERIO_ETIQUETAS == 0: #CAMINO PRINCIPAL: LA 1º ETIQUETA EN LLEGAR (sin cambio durante ejecución)
+                flag_exite_dedenne = False
+                if self.node_ID != ID_ROOT:   #NODOS NORMALES
+                    for label in self.node_label:
+                        long = len(label_new)
+                        if (long > len(label[0][0:len(label_new)])):
+                            long = len(label[0][0:len(label_new)])
 
-                    if label[0] == label_new_2:  #Ya tengo la etiqueta guardada, actualizo TTL
-                        flag_exite_dedenne = True
-                        #label[4] = TIME_ACTIVE_LABEL
-                        label[1] = self.get_previous_hop(pkt)
-                        #GENERO MENSAJE Y LO ENVÍO CON label_new_2
-                        self.pkt_creation(2,label)
-                        break
-
-                    elif label[0][0:long] == label_new[0:long] and (label_new[0:long] != '1.' and label[0][0:long] != '1.'):  #Comprobación prefijo = PREFIX
-                        flag_exite_dedenne = True
-
-                        #if label_new_2[0:len(label_new_2)-4] == label: #Si coincide prefijo, NODO HERMANO, no hago nada (NO INTERESA)
-                            #break
-
-                        ### ÁRBOL PRINCIPAL ###
-                        if flag_main_tree == 1 and label[3] == 'Yes':
-                            flag_tree = False
-                            if self.trees_table != []:
-                                for tree in self.trees_table:
-                                    if label[0] == tree[0] and tree[1] == 'MAIN':
-                                        flag_tree=True
-                                        break
-                            if not flag_tree or self.trees_table == []:
-                                self.trees_table.append([label[0], 'MAIN','UNDEFINED',[]])
-
-                            ### COMPROBACIÓN TIPO DE NODO ###
-                            #Si coincide el prefijo quitando los dos primeros dígitos => NODO HERMANO
-                            #self.write_on_file('label %s' % label[0])
-                            #self.write_on_file('label-4 %s' % label[0][0:len(label_new_2)-4])
-                            #self.write_on_file('label_new_2 %s' % label_new_2)
-                            #self.write_on_file('label_new %s' % label_new)
-                            #self.write_on_file('label_new_2 -4 %s' % label_new_2[0:len(label_new_2)-4])
-
-                            #if label_new_2[0:len(label_new_2)-4] == label[0][0:len(label_new_2)-4]:   #Etiqueta HERMANA
-                            #    break
-
-                            #Si prefijo ya está almacenado => NODO PADRE
-                            #else:
-                            if label_new_2[0:len(label_new_2)-4] == label[0]:
-                                for entry in self.trees_table:
-                                    if entry[0] == label[0] and entry[1] == 'MAIN':
-                                        if entry[2] != 'PARENT':
-                                            entry[2] = 'PARENT'
-
-                                        id_hijo=int(label_new[len(label_new)-2])
-                                        if not (id_hijo in entry[3]):
-                                            entry[3].append(id_hijo)
-                                            self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
-                                            #self.print_trees_table()
-
-                                            self.sons_info.append([id_hijo, False, 0])
-                                            self.print_sons_table()
-
-                                        if label[2] != 'PARENT':
-                                            label[2] = 'PARENT'
-                                            self.datos_almacenados["type"] = 2 #NODO PADRE
-                                            #self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
-                                            #self.print_labels()
-                                        break
-
-                        ### ÁRBOLES SECUNDARIOS ###
-                        else:
-                            flag_tree = False
-                            if self.trees_table != []:
-                                for tree in self.trees_table:
-                                    if label[0] == tree[0] and tree[1] == '-':
-                                        flag_tree=True
-                                        break
-                            if not flag_tree or self.trees_table == []:
-                                self.trees_table.append([label[0], '-','UNDEFINED',[]])
-
-                            ### COMPROBACIÓN TIPO DE NODO ###
-                            #Si coincide el prefijo quitando los dos primeros dígitos => NODO HERMANO
-                            #if label_new_2[0:len(label_new_2)-4] == label:
-                            #    break
-
-                            #Si prefijo ya está almacenado => NODO PADRE
-                            #else:
-                            if label_new[0:len(label_new_2)-4] == label[0]:
-                                for entry in self.trees_table:
-                                    if entry[0] == label[0] and entry[1] == '-':
-                                        if entry[2] != 'PARENT':
-                                            entry[2] = 'PARENT'
-
-                                        id_hijo=int(label_new[len(label_new)-2])
-                                        if not (id_hijo in entry[3]):
-                                            entry[3].append(id_hijo)
-                                            #self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
-                                            #self.print_trees_table()
-                                        if label[2] != 'PARENT':
-                                            label[2] = 'PARENT'
-                                            #self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
-                                            #self.print_labels()
-                                        break
-
-                    elif FLAG_PREFIJO:
-                        if label[0][0:(2*DIGITOS_PREFIJO)-1] == label_new_2[0:(2*DIGITOS_PREFIJO)-1]:
+                        if label[0] == label_new_2:  #Ya tengo la etiqueta guardada, actualizo TTL
                             flag_exite_dedenne = True
+                            #label[4] = TIME_ACTIVE_LABEL
+                            label[1] = self.get_previous_hop(pkt)
+                            #GENERO MENSAJE Y LO ENVÍO CON label_new_2
+                            self.pkt_creation(2,label)
                             break
-                    if flag_exite_dedenne:
-                        break
+
+                        elif label[0][0:long] == label_new[0:long] and (label_new[0:long] != '1.' and label[0][0:long] != '1.'):  #Comprobación prefijo = PREFIX
+                            flag_exite_dedenne = True
+
+                            #if label_new_2[0:len(label_new_2)-4] == label: #Si coincide prefijo, NODO HERMANO, no hago nada (NO INTERESA)
+                                #break
+
+                            ### ÁRBOL PRINCIPAL ###
+                            if flag_main_tree == 1 and label[3] == 'Yes':
+                                flag_tree = False
+                                if self.trees_table != []:
+                                    for tree in self.trees_table:
+                                        if label[0] == tree[0] and tree[1] == 'MAIN':
+                                            flag_tree=True
+                                            break
+                                if not flag_tree or self.trees_table == []:
+                                    self.trees_table.append([label[0], 'MAIN','UNDEFINED',[]])
+
+                                ### COMPROBACIÓN TIPO DE NODO ###
+                                #Si coincide el prefijo quitando los dos primeros dígitos => NODO HERMANO
+                                #self.write_on_file('label %s' % label[0])
+                                #self.write_on_file('label-4 %s' % label[0][0:len(label_new_2)-4])
+                                #self.write_on_file('label_new_2 %s' % label_new_2)
+                                #self.write_on_file('label_new %s' % label_new)
+                                #self.write_on_file('label_new_2 -4 %s' % label_new_2[0:len(label_new_2)-4])
+
+                                #if label_new_2[0:len(label_new_2)-4] == label[0][0:len(label_new_2)-4]:   #Etiqueta HERMANA
+                                #    break
+
+                                #Si prefijo ya está almacenado => NODO PADRE
+                                #else:
+                                if label_new_2[0:len(label_new_2)-4] == label[0]:
+                                    for entry in self.trees_table:
+                                        if entry[0] == label[0] and entry[1] == 'MAIN':
+                                            if entry[2] != 'PARENT':
+                                                entry[2] = 'PARENT'
+
+                                            id_hijo=int(label_new[len(label_new)-2])
+                                            if not (id_hijo in entry[3]):
+                                                entry[3].append(id_hijo)
+                                                self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
+                                                #self.print_trees_table()
+
+                                                self.sons_info.append([id_hijo, False, 0])
+                                                self.print_sons_table()
+
+                                            if label[2] != 'PARENT':
+                                                label[2] = 'PARENT'
+                                                self.datos_almacenados["type"] = 2 #NODO PADRE
+                                                #self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
+                                                #self.print_labels()
+                                            break
+
+                            ### ÁRBOLES SECUNDARIOS ###
+                            else:
+                                flag_tree = False
+                                if self.trees_table != []:
+                                    for tree in self.trees_table:
+                                        if label[0] == tree[0] and tree[1] == '-':
+                                            flag_tree=True
+                                            break
+                                if not flag_tree or self.trees_table == []:
+                                    self.trees_table.append([label[0], '-','UNDEFINED',[]])
+
+                                ### COMPROBACIÓN TIPO DE NODO ###
+                                #Si coincide el prefijo quitando los dos primeros dígitos => NODO HERMANO
+                                #if label_new_2[0:len(label_new_2)-4] == label:
+                                #    break
+
+                                #Si prefijo ya está almacenado => NODO PADRE
+                                #else:
+                                if label_new[0:len(label_new_2)-4] == label[0]:
+                                    for entry in self.trees_table:
+                                        if entry[0] == label[0] and entry[1] == '-':
+                                            if entry[2] != 'PARENT':
+                                                entry[2] = 'PARENT'
+
+                                            id_hijo=int(label_new[len(label_new)-2])
+                                            if not (id_hijo in entry[3]):
+                                                entry[3].append(id_hijo)
+                                                #self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
+                                                #self.print_trees_table()
+                                            if label[2] != 'PARENT':
+                                                label[2] = 'PARENT'
+                                                #self.write_on_file('[INFO] Nuevo ID de hijo añadido a: %s' % label[0])
+                                                #self.print_labels()
+                                            break
+
+                        elif FLAG_PREFIJO:
+                            if label[0][0:(2*DIGITOS_PREFIJO)-1] == label_new_2[0:(2*DIGITOS_PREFIJO)-1]:
+                                flag_exite_dedenne = True
+                                break
+                        if flag_exite_dedenne:
+                            break
 
 
-                if not flag_exite_dedenne:  #No tengo la etiqueta, la guardo = NEW PREFIX
-                    if self.node_label == []:
-                        principal='Yes'
-                    else:
-                        principal = '-'
-
-                    if len(self.node_label) < MAX_DEDENNE_LABELS:
-                        if self.get_previous_hop(pkt) == 0:  #Hasta que no conozca al vecino, no añado su etiqueta
-                            return
-
-                        #self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal,TIME_ACTIVE_LABEL, mac_src])
-                        self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal, mac_src])
-
-                        #self.write_on_file('[INFO] New Dedenne Label: %s' % label_new_2)
-                        #self.print_labels()
-
-                        #Actualizar tabla de árboles
-                        if principal == 'Yes':
-                            self.trees_table.append([label_new_2, 'MAIN','UNDEFINED',[]])
+                    if not flag_exite_dedenne:  #No tengo la etiqueta, la guardo = NEW PREFIX
+                        if self.node_label == []:
+                            principal='Yes'
                         else:
-                            self.trees_table.append([label_new_2, '-','UNDEFINED',[]])
-                        self.write_on_file('[INFO] Nueva HLMAC añadida: %s' % label_new_2)
+                            principal = '-'
 
-                        ##### TIEMPO DE 1º ID #####
-                        now = datetime.datetime.now()
-                        current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
-                        self.datos_almacenados["time_1_ID"]= round(current_time-self.datos_almacenados["root_time"])
-                        ###########################
+                        if len(self.node_label) < MAX_DEDENNE_LABELS:
+                            if self.get_previous_hop(pkt) == 0:  #Hasta que no conozca al vecino, no añado su etiqueta
+                                return
+
+                            #self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal,TIME_ACTIVE_LABEL, mac_src])
+                            self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal, mac_src])
+
+                            #self.write_on_file('[INFO] New Dedenne Label: %s' % label_new_2)
+                            #self.print_labels()
+
+                            #Actualizar tabla de árboles
+                            if principal == 'Yes':
+                                self.trees_table.append([label_new_2, 'MAIN','UNDEFINED',[]])
+                            else:
+                                self.trees_table.append([label_new_2, '-','UNDEFINED',[]])
+                            self.write_on_file('[INFO] Nueva HLMAC añadida: %s' % label_new_2)
+
+                            ##### TIEMPO DE 1º ID #####
+                            now = datetime.datetime.now()
+                            current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                            self.datos_almacenados["time_1_ID"]= round(current_time-self.datos_almacenados["root_time"])
+                            ###########################
+
+                            #self.print_trees_table()
+                            #GENERO MENSAJE Y LO ENVÍO CON label_new_2
+                            for label in self.node_label:
+                                if label[0] == label_new_2:
+                                    self.pkt_creation(2,label)
+                                #now = datetime.datetime.now()
+                                #print ("Envío mensaje de etiqueta : ")
+                                #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+
+                    if flag_exite_dedenne and self.trees_table == []:
+                        self.trees_table.append([self.node_label[0][0], 'MAIN','UNDEFINED',[]])
+                        self.write_on_file('[INFO] Nueva entrada añadida: %s' % label_new_2)
 
                         #self.print_trees_table()
-                        #GENERO MENSAJE Y LO ENVÍO CON label_new_2
-                        for label in self.node_label:
-                            if label[0] == label_new_2:
-                                self.pkt_creation(2,label)
-                            #now = datetime.datetime.now()
-                            #print ("Envío mensaje de etiqueta : ")
-                            #print (now.strftime("%Y-%m-%d %H:%M:%S"))
 
-                if flag_exite_dedenne and self.trees_table == []:
-                    self.trees_table.append([self.node_label[0][0], 'MAIN','UNDEFINED',[]])
-                    self.write_on_file('[INFO] Nueva entrada añadida: %s' % label_new_2)
-
-                    #self.print_trees_table()
-
-                #self.write_on_file('ETIQUETAS RECIBIDAS DEL ARBOL PRINCIPAL %s ' % self.main_labels)
-                #print('TIPO NODO ARBOL PRINCIPAL %s' % self.node_label[0][2])
-                #print('FLAG INIT LOAD ' + str(self.flag_init_load))
-                #self.print_labels()
-                #self.print_trees_table()
-                self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
-                if len(self.info_neighbours) == 1 and mac_src == self.info_neighbours[0][0] and not self.flag_init_load:    #ONLY ONE NEIGHBOUR?
-                    self.trees_table[0][2] = 'LEAF'
-                    self.node_label[0][2] = 'LEAF'
-                    self.write_on_file('[INFO] Solo tengo un vecino y él me ha pasado la etiqueta: LEAF')
+                    #self.write_on_file('ETIQUETAS RECIBIDAS DEL ARBOL PRINCIPAL %s ' % self.main_labels)
+                    #print('TIPO NODO ARBOL PRINCIPAL %s' % self.node_label[0][2])
+                    #print('FLAG INIT LOAD ' + str(self.flag_init_load))
                     #self.print_labels()
                     #self.print_trees_table()
-                    self.flag_init_load = True
-                    self.comput_load_sharing()
-
-                elif (len(self.main_labels) == len(self.info_neighbours)) and self.trees_table[0][2] == 'UNDEFINED' and not self.flag_init_load:  #MORE THAN 1 NEIGHBOUR: CHECK INFO
-                    #print(self.main_labels)
-                    self.write_on_file('[INFO] Tengo toda la información de mis vecinos y no soy padre: LEAF')
-                    #print(self.main_labels)
-                    self.trees_table[0][2] = 'LEAF'
-                    self.node_label[0][2] = 'LEAF'
-                    #self.print_labels()
-                    #self.print_trees_table()
-                    self.flag_init_load = True
-                    self.comput_load_sharing()
-
-                #else:    #LOAD TIMER ENABLE
-                #    self.load_thread=threading.Thread(target=self.wait_labels)  #Envio hello pkt cada 5s
-                    #t_hello.daemon = True
-                #    t_hello.start()
-
-            else:   #PARA NODO ROOT: Tabla de árboles con hijos
-                if self.trees_table == []:
-                    self.trees_table.append(['1','MAIN','LEAF',[]])
-
-                if label_new_2[0:len(label_new_2)-4] == '1':
-                    data = struct.unpack("!6B", pkt[6:12])
-                    mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
                     self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
-                    for neigh in self.info_neighbours:
-                        if neigh[0] == mac_rcv:
-                            if not neigh[1] in self.trees_table[0][3]:
-                                self.trees_table[0][2] = 'PARENT'
-                                self.trees_table[0][3].append(neigh[1])
-                                self.print_trees_table()
-                                self.sons_info.append([neigh[1], False, 0])
-                                #self.print_sons_table()
+                    if len(self.info_neighbours) == 1 and mac_src == self.info_neighbours[0][0] and not self.flag_init_load:    #ONLY ONE NEIGHBOUR?
+                        self.trees_table[0][2] = 'LEAF'
+                        self.node_label[0][2] = 'LEAF'
+                        self.write_on_file('[INFO] Solo tengo un vecino y él me ha pasado la etiqueta: LEAF')
+                        #self.print_labels()
+                        #self.print_trees_table()
+                        self.flag_init_load = True
+                        self.comput_load_sharing()
+
+                    elif (len(self.main_labels) == len(self.info_neighbours)) and self.trees_table[0][2] == 'UNDEFINED' and not self.flag_init_load:  #MORE THAN 1 NEIGHBOUR: CHECK INFO
+                        #print(self.main_labels)
+                        self.write_on_file('[INFO] Tengo toda la información de mis vecinos y no soy padre: LEAF')
+                        #print(self.main_labels)
+                        self.trees_table[0][2] = 'LEAF'
+                        self.node_label[0][2] = 'LEAF'
+                        #self.print_labels()
+                        #self.print_trees_table()
+                        self.flag_init_load = True
+                        self.comput_load_sharing()
+
+                    #else:    #LOAD TIMER ENABLE
+                    #    self.load_thread=threading.Thread(target=self.wait_labels)  #Envio hello pkt cada 5s
+                        #t_hello.daemon = True
+                    #    t_hello.start()
+
+                else:   #PARA NODO ROOT: Tabla de árboles con hijos
+                    if self.trees_table == []:
+                        self.trees_table.append(['1','MAIN','LEAF',[]])
+
+                    if label_new_2[0:len(label_new_2)-4] == '1':
+                        data = struct.unpack("!6B", pkt[6:12])
+                        mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
+                        self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
+                        for neigh in self.info_neighbours:
+                            if neigh[0] == mac_rcv:
+                                if not neigh[1] in self.trees_table[0][3]:
+                                    self.trees_table[0][2] = 'PARENT'
+                                    self.trees_table[0][3].append(neigh[1])
+                                    self.print_trees_table()
+                                    self.sons_info.append([neigh[1], False, 0])
+                                    #self.print_sons_table()
+
+            #######################################################################################################
+            if CRITERIO_ETIQUETAS == 1: #CAMINO PRINCIPAL: LA ETIQUETA MÁS CORTA (posible cambio durante ejecución)
+                #self.write_on_file('[INFO] ETIQUETA RECIBIDA %s' % label_new_2)
+                flag_exite_dedenne = False
+                if self.node_ID != ID_ROOT:   #NODOS NORMALES
+                    for label in self.node_label:
+                        long = len(label_new)
+                        if (long > len(label[0][0:len(label_new)])):
+                            long = len(label[0][0:len(label_new)])
+
+                        if label[0] == label_new_2:  #Ya tengo la etiqueta guardada, actualizo TTL
+                            flag_exite_dedenne = True
+                            label[1] = self.get_previous_hop(pkt)
+                            #GENERO MENSAJE Y LO ENVÍO CON label_new_2
+                            '''
+                            if (self.node_ID == 6 or self.node_ID==5 or self.node_ID==2) and self.primero== 0:
+                                delay=random.randint(300,500)
+                                self.primero=1
+                            elif(self.node_ID == 3 or self.node_ID==1 or self.node_ID==7) and self.primero== 0:
+                                delay=random.randint(100,200)
+                                self.primero=1
+                            else:
+                                delay=random.randint(0,5)
+                            self.write_on_file('[INFO] Delay introducido %d ms' %delay/1000)
+                            time.sleep(delay/1000)
+                            '''
+                            self.pkt_creation(2,label)
+                            break
+
+                        elif label[0][0:long] == label_new[0:long] and (label_new[0:long] != '1.' and label[0][0:long] != '1.'):  #Comprobación prefijo = ETIQUETA HIJA
+                            flag_exite_dedenne = True
+
+                            ### ÁRBOL PRINCIPAL ### (AÑADIR HIJOS DEL ÁRBOL PRINCIPAL)
+                            if flag_main_tree == 1 and label[3] == 'Yes':
+                                flag_tree = False
+                                if self.trees_table != []:
+                                    for tree in self.trees_table:
+                                        if label[0] == tree[0] and tree[1] == 'MAIN':
+                                            flag_tree=True
+                                            break
+                                if not flag_tree or self.trees_table == []:
+                                    self.trees_table.append([label[0], 'MAIN','UNDEFINED',[]])
+
+                                if label_new_2[0:len(label_new_2)-4] == label[0]:
+                                    for entry in self.trees_table:
+                                        if entry[0] == label[0] and entry[1] == 'MAIN':
+                                            if entry[2] != 'PARENT':
+                                                entry[2] = 'PARENT'
+
+                                            id_hijo=int(label_new[len(label_new)-2])
+                                            if not (id_hijo in entry[3]):
+                                                entry[3].append(id_hijo)
+                                                self.write_on_file('[INFO] Nuevo ID de hijo añadido al árbol principal: %s' % label[0])
+                                                self.sons_info.append([id_hijo, False, 0])
+                                                self.print_sons_table()
+
+                                            if label[2] != 'PARENT':
+                                                label[2] = 'PARENT'
+                                                self.datos_almacenados["type"] = 2 #NODO PADRE
+                                            break
+
+                            ### ÁRBOLES SECUNDARIOS ### (AÑADIR HIJOS DE ÁRBOLES SECUNDARIOS)
+                            else:
+                                flag_tree = False
+                                if self.trees_table != []:
+                                    for tree in self.trees_table:
+                                        if label[0] == tree[0] and tree[1] == '-':
+                                            flag_tree=True
+                                            break
+                                if not flag_tree or self.trees_table == []:
+                                    self.trees_table.append([label[0], '-','UNDEFINED',[]])
+
+                                #Si prefijo ya está almacenado => NODO PADRE
+                                if label_new[0:len(label_new_2)-4] == label[0]:
+                                    for entry in self.trees_table:
+                                        if entry[0] == label[0] and entry[1] == '-':
+                                            if entry[2] != 'PARENT':
+                                                entry[2] = 'PARENT'
+
+                                            id_hijo=int(label_new[len(label_new)-2])
+                                            if not (id_hijo in entry[3]):
+                                                entry[3].append(id_hijo)
+                                            if label[2] != 'PARENT':
+                                                label[2] = 'PARENT'
+                                            break
+
+                        elif FLAG_PREFIJO: #COMPROBACIÓN NÚMERO DÍGITOS DE PREFIJO DE ETIQUETA
+                            if label[0][0:(2*DIGITOS_PREFIJO)-1] == label_new_2[0:(2*DIGITOS_PREFIJO)-1]:
+                                flag_exite_dedenne = True
+                                break
+                        if flag_exite_dedenne:
+                            break
+
+                    if not flag_exite_dedenne:  #No tengo la etiqueta, la guardo = NUEVO PREFIJO Y NUEVA ETIQUETA
+                        #self.write_on_file('[INFO] No tengo la etiqueta recibida')
+                        #self.print_labels()
+                        #########################
+                        flag_cambio_etiq=False
+                        #########################
+                        if self.node_label == []:
+                            principal='Yes'
+                        #########################
+                        #Recibo una etiqueta de camino principal más corta que la actual = ME LA QUEDO
+                        elif (len(self.node_label[0][0]) > len(label_new_2)) and (self.node_label[0][3] == 'Yes') and (flag_main_tree == 1):
+                            principal='Yes'
+                            flag_cambio_etiq=True
+                            self.write_on_file('[INFO] Etiqueta almacenada %s. Nueva etiqueta recibida más corta %s -> CAMBIO ETIQUETA' %(self.node_label[0][0], label_new_2))
+                        #########################
+                        else:
+                            principal = '-'
+
+                        #########################
+                        if flag_cambio_etiq:   #Hay que actualizar la etiqueta del camino principal
+                            self.flag_init_load = False #Para que vuelva a iniciar el proceso de carga
+                            if self.get_previous_hop(pkt) == 0:  #Hasta que no conozca al vecino, no añado su etiqueta
+                                return
+                            #Se sustituye la etiqueta del camino principal
+                            #self.write_on_file('[INFO] Info de etiquetas antes del cambio')
+                            #self.print_labels()
+                            self.node_label[0] = [label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal, mac_src]
+                            self.write_on_file('[INFO] HLMAC del camino principal modificada: %s' % label_new_2)
+                            self.print_labels()
+
+                            #Se elimina la lista de información de los vecinos anterior
+                            self.main_labels=[]
+                            self.main_labels.append([label_new_2, id_src])
+                            #self.write_on_file(self.main_labels)
+
+                            #Se elimina la lista de informacion de los hijos anterior
+                            #self.write_on_file('[INFO] Info de hijos antes del cambio')
+                            #self.print_sons_table()
+                            self.sons_info=[]
+                            #self.write_on_file('[INFO] Reset de info de hijos')
+                            #self.print_sons_table()
+
+                            #Actualizar tabla de árboles
+                            #self.write_on_file('[INFO] Tabla de árboles antes del cambio')
+                            #self.print_trees_table()
+                            self.trees_table[0]=[label_new_2, 'MAIN','UNDEFINED',[]]
+                            #self.write_on_file('[INFO] Tabla de árboles después del cambio')
+                            #self.print_trees_table()
+
+                            ##### TIEMPO DE 1º ID #####
+                            now = datetime.datetime.now()
+                            current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                            self.datos_almacenados["time_1_ID"]= round(current_time-self.datos_almacenados["root_time"])
+
+                            #GENERO MENSAJE Y LO ENVÍO CON label_new_2
+                            for label in self.node_label:
+                                if label[0] == label_new_2:
+                                    '''
+                                    if (self.node_ID == 6 or self.node_ID==5 or self.node_ID==2) and self.primero== 0:
+                                        delay=random.randint(300,500)
+                                        self.primero=1
+                                    elif(self.node_ID == 3 or self.node_ID==1 or self.node_ID==7) and self.primero== 0:
+                                        delay=random.randint(100,200)
+                                        self.primero=1
+                                    else:
+                                        delay=random.randint(0,5)
+                                    self.write_on_file('[INFO] Delay introducido %d ms' %delay/1000)
+                                    time.sleep(delay/1000)
+                                    '''
+                                    self.pkt_creation(2,label)
+                        #########################
+
+                        if len(self.node_label) < MAX_DEDENNE_LABELS:
+                            if self.get_previous_hop(pkt) == 0:  #Hasta que no conozca al vecino, no añado su etiqueta
+                                return
+
+                            self.node_label.append([label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal, mac_src])
+
+                            #Actualizar tabla de árboles
+                            if principal == 'Yes':
+                                self.trees_table.append([label_new_2, 'MAIN','UNDEFINED',[]])
+                            else:
+                                self.trees_table.append([label_new_2, '-','UNDEFINED',[]])
+                            self.write_on_file('[INFO] Nueva HLMAC añadida: %s' % label_new_2)
+                            self.print_labels()
+
+                            ##### TIEMPO DE 1º ID #####
+                            now = datetime.datetime.now()
+                            current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
+                            self.datos_almacenados["time_1_ID"]= round(current_time-self.datos_almacenados["root_time"])
+                            ###########################
+
+                            #GENERO MENSAJE Y LO ENVÍO CON label_new_2
+                            for label in self.node_label:
+                                if label[0] == label_new_2:
+                                    #delay=random.randint(0,500)
+                                    #self.write_on_file('[INFO] Delay introducido %f ms' %(delay/1000))
+                                    #time.sleep(float(delay/1000))
+                                    self.pkt_creation(2,label)
+
+                    if flag_exite_dedenne and self.trees_table == []:  #Actualizar la primera entrada a tabla de árboles
+                        self.trees_table.append([self.node_label[0][0], 'MAIN','UNDEFINED',[]])
+                        self.write_on_file('[INFO] Nueva entrada añadida: %s' % label_new_2)
+
+                    self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
+                    if len(self.info_neighbours) == 1 and mac_src == self.info_neighbours[0][0] and not self.flag_init_load:    #ONLY ONE NEIGHBOUR?
+                        self.trees_table[0][2] = 'LEAF'
+                        self.node_label[0][2] = 'LEAF'
+                        self.write_on_file('[INFO] Solo tengo un vecino y él me ha pasado la etiqueta: LEAF')
+                        self.flag_init_load = True
+                        self.comput_load_sharing()
+
+                    elif (len(self.main_labels) == len(self.info_neighbours)) and self.trees_table[0][2] == 'UNDEFINED' and not self.flag_init_load:  #MORE THAN 1 NEIGHBOUR: CHECK INFO
+                        self.write_on_file('[INFO] Tengo toda la información de mis vecinos y no soy padre: LEAF')
+                        self.trees_table[0][2] = 'LEAF'
+                        self.node_label[0][2] = 'LEAF'
+                        self.flag_init_load = True
+                        self.comput_load_sharing()
+
+                else:   #PARA NODO ROOT: Tabla de árboles con hijos
+                    if self.trees_table == []:
+                        self.trees_table.append(['1','MAIN','LEAF',[]])
+
+                    if label_new_2[0:len(label_new_2)-4] == '1':
+                        data = struct.unpack("!6B", pkt[6:12])
+                        mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
+                        self.check_neigh_expiration()   #ACTUALIZAR TIME STAMPS
+                        for neigh in self.info_neighbours:
+                            if neigh[0] == mac_rcv:
+                                if not neigh[1] in self.trees_table[0][3]:
+                                    self.trees_table[0][2] = 'PARENT'
+                                    self.trees_table[0][3].append(neigh[1])
+                                    self.print_trees_table()
+                                    self.sons_info.append([neigh[1], False, 0])
+                                    #self.print_sons_table()
+            #######################################################################################################
 
 
 ###############################################################################################################################################################################################
@@ -972,6 +1263,7 @@ class pkt_sniffer:
         self.write_on_file('[INFO] Recibido paquete de carga con MAC_src %s' % mac_rcv)
 
         self.pkt_creation(4,[],0,0,mac_rcv)    #ACK
+        self.write_on_file('[INFO] Mandado ACK a MAC_src %s' % mac_rcv)
 
         ##### TIEMPO DE ULTIMO ACK #####
         now = datetime.datetime.now()
@@ -985,13 +1277,18 @@ class pkt_sniffer:
         abs_value_rcv=abs_value[0] + abs_value[1]
         abs_value_rcv=int(abs_value_rcv,16)
 
-        #if self.node_ID == ID_ROOT:
-        if mac_rcv not in self.datos_almacenados["children_list"]:
-            self.datos_almacenados["children_list"].append(mac_rcv)
-            self.datos_almacenados["abs_load_balance_list"].append(abs_value_rcv)
-        else:
-            c = self.datos_almacenados["children_list"].index(mac_rcv)
-            self.datos_almacenados["abs_load_balance_list"][c]=abs_value_rcv
+        id_rcv=0
+        for neigh in self.info_neighbours:
+           if neigh[0] == mac_rcv:
+               id_rcv=neigh[1]
+
+        if id_rcv in self.trees_table[0][3]:  #Compruebo que la id que ha mandado carga este dentro de mis hijos
+            if mac_rcv not in self.datos_almacenados["children_list"]:
+                self.datos_almacenados["children_list"].append(mac_rcv)
+                self.datos_almacenados["abs_load_balance_list"].append(abs_value_rcv)
+            else:
+                c = self.datos_almacenados["children_list"].index(mac_rcv)
+                self.datos_almacenados["abs_load_balance_list"][c]=abs_value_rcv
 
         #self.write_on_file(self.datos_almacenados["abs_load_balance_list"])
 
@@ -1058,9 +1355,10 @@ class pkt_sniffer:
             #print(len(flags))
             if len(self.sons_info) == len(flags):
                 #self.computational_load += value
-                #print(self.long_ant)
+                #print(value)
                 #print(self.value_ant)
-                if self.long_ant < len(self.sons_info) or self.value_ant != value:    #Para solo enviar si hay cambio de información (En nº vecinos o valor de carga): No constantemente
+                if (self.long_ant < len(self.sons_info) or self.value_ant != value) or self.flag_cambio:    #Para solo enviar si hay cambio de información (En nº vecinos o valor de carga): No constantemente
+                    self.flag_cambio=False
                     self.long_ant = len(self.sons_info)
                     self.value_ant = value
                     #self.print_sons_table()
@@ -1069,10 +1367,10 @@ class pkt_sniffer:
                         #self.print_trees_table()
                         #if self.long_ant < len(self.sons_info):
                             #self.long_ant = len(self.sons_info)
-                        self.write_on_file('[INFO] Valor de carga computacional PADRE %d' % (self.computational_load))
-                        self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
+                        self.write_on_file('[INFO] Valor de carga computacional %d' % (self.computational_load))
+                        #self.write_on_file('[INFO] Actualizado valor de carga %d' % (self.computational_load+value))
                         #self.datos_almacenados[]
-                        self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
+                        #self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
                         self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])+abs(self.computational_load)
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
 
@@ -1172,7 +1470,7 @@ class pkt_sniffer:
                             data = struct.unpack("!1B1B" , pkt[15:17])
                             self.process_load_pkt(data, pkt)
                         elif option == 4:
-                            self.write_on_file('[INFO] -- Recibido ACK --')
+                            #self.write_on_file('[INFO] -- Recibido ACK --')
                             data = struct.unpack("!6B" , pkt[6:12])
                             mac_rcv='%s:%s:%s:%s:%s:%s' % (format(data[0], '02x'),format(data[1], '02x'),format(data[2], '02x'),format(data[3], '02x'),format(data[4], '02x'),format(data[5], '02x'))
                             if mac_rcv == self.node_label[self.tree_index][4]:   #Recibido ACK de mi PADRE
@@ -1212,6 +1510,10 @@ class pkt_sniffer:
 
             for interface_writable in writable:
                 if (interface_writable in self.message_queues):
+                    #Simulación cola de salida
+                    delay=random.randint(0,250)
+                    #self.write_on_file('[INFO] Delay introducido %f ms' %(delay/1000))
+                    time.sleep(float(delay/1000))
                     #self.write_on_file('[INFO] N mensajes a mandar %d' % len(self.message_queues[interface_writable]))
                     for idx, msg in enumerate(self.message_queues[interface_writable]):
                         #print('Envio paquete (id = %d ) -> %s' % (idx, msg))
