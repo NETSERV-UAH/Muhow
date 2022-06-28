@@ -37,6 +37,11 @@ PATH = '/home/arppath/TFM/Logs/'
 FICHERO_TOPO = sys.argv[1]
 FLAG_10_ITERACION = False
 CRITERIO_ETIQUETAS = int(sys.argv[2]) #0-> 1º en llegar / 1-> Etiqueta más corta
+PROB_LOSS = float(sys.argv[3]) #0-> 1º en llegar / 1-> Etiqueta más corta
+
+#PROB_LOSS = 0.01 #1%
+#PROB_LOSS = 0.02 #2%
+#PROB_LOSS = 0.005 #0.5%
 
 ###############################################################################################################################################################################################
 def handler(signum, frame):  #Kill all threads
@@ -121,7 +126,7 @@ class pkt_sniffer:
                     if i == self.node_ID:
                         #self.write_on_file(elem)
                         self.computational_load = int(elem[3])
-                        #self.write_on_file('[INFO] Carga del nodo obtenida del fichero: %d' % self.computational_load)
+                        self.write_on_file('[INFO] Carga del nodo obtenida del fichero: %d' % self.computational_load)
                     i+=1
                 file.close()
             else:
@@ -201,7 +206,10 @@ class pkt_sniffer:
             if self.node_ID == ID_ROOT:
                 if self.iteration >= 1:
                     os.system('cat /home/arppath/TFM/Logs/linea_sta* >> /home/arppath/TFM/Logs/info_it_%d.txt' % (self.iteration-1))
+                    os.system('cat /home/arppath/TFM/Logs/etiq_sta* >> /home/arppath/TFM/Logs/todas_etiq.txt')
                     os.system('rm /home/arppath/TFM/Logs/linea_sta*')
+                    os.system('rm /home/arppath/TFM/Logs/etiq_sta*')
+
                 if self.iteration == 12:
                     if FLAG_10_ITERACION:
                         #time.sleep(1)
@@ -250,7 +258,13 @@ class pkt_sniffer:
                 self.datos_almacenados["time_1_ID"]= 0
                 self.datos_almacenados["time_1_pkt_load"]= 0
                 self.datos_almacenados["time_last_ACK"]= 0
+                f=open(PATH +'etiq_sta%d.txt' %self.node_ID,'w')
+                f.write('%d  %s  ROOT\n' %(self.node_ID,self.node_label[0][0]))
+                f.close()
 
+                f=open(PATH +'info_root.txt','w')
+                f.write('%d 1 0\n' %(self.node_ID))
+                f.close()
                 ###########################################
 
             timestamp_hex = [hex(self.time_stamp >> i & 0xff) for i in (56,48,40,32,24,16,8,0)]
@@ -955,6 +969,9 @@ class pkt_sniffer:
                             else:
                                 self.trees_table.append([label_new_2, '-','UNDEFINED',[]])
                             self.write_on_file('[INFO] Nueva HLMAC añadida: %s' % label_new_2)
+                            f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                            f.write('%d  %s\n' %(self.node_ID,label_new_2))
+                            f.close()
 
                             ##### TIEMPO DE 1º ID #####
                             now = datetime.datetime.now()
@@ -991,6 +1008,9 @@ class pkt_sniffer:
                         #self.print_trees_table()
                         self.flag_init_load = True
                         self.comput_load_sharing()
+                        f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                        f.write('%d  %s  LEAF\n' %(self.node_ID,self.node_label[0][0]))
+                        f.close()
 
                     elif (len(self.main_labels) == len(self.info_neighbours)) and self.trees_table[0][2] == 'UNDEFINED' and not self.flag_init_load:  #MORE THAN 1 NEIGHBOUR: CHECK INFO
                         #print(self.main_labels)
@@ -1002,6 +1022,9 @@ class pkt_sniffer:
                         #self.print_trees_table()
                         self.flag_init_load = True
                         self.comput_load_sharing()
+                        f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                        f.write('%d  %s  LEAF\n' %(self.node_ID,self.node_label[0][0]))
+                        f.close()
 
                     #else:    #LOAD TIMER ENABLE
                     #    self.load_thread=threading.Thread(target=self.wait_labels)  #Envio hello pkt cada 5s
@@ -1146,6 +1169,9 @@ class pkt_sniffer:
                             #self.print_labels()
                             self.node_label[0] = [label_new_2, self.get_previous_hop(pkt),'UNDEFINED', principal, mac_src]
                             self.write_on_file('[INFO] HLMAC del camino principal modificada: %s' % label_new_2)
+                            f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                            f.write('%d  %s\n' %(self.node_ID,label_new_2))
+                            f.close()
                             self.print_labels()
 
                             #Se elimina la lista de información de los vecinos anterior
@@ -1202,6 +1228,9 @@ class pkt_sniffer:
                             else:
                                 self.trees_table.append([label_new_2, '-','UNDEFINED',[]])
                             self.write_on_file('[INFO] Nueva HLMAC añadida: %s' % label_new_2)
+                            f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                            f.write('%d  %s\n' %(self.node_ID,label_new_2))
+                            f.close()
                             self.print_labels()
 
                             ##### TIEMPO DE 1º ID #####
@@ -1229,6 +1258,9 @@ class pkt_sniffer:
                         self.write_on_file('[INFO] Solo tengo un vecino y él me ha pasado la etiqueta: LEAF')
                         self.flag_init_load = True
                         self.comput_load_sharing()
+                        f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                        f.write('%d  %s  LEAF\n' %(self.node_ID,self.node_label[0][0]))
+                        f.close()
 
                     elif (len(self.main_labels) == len(self.info_neighbours)) and self.trees_table[0][2] == 'UNDEFINED' and not self.flag_init_load:  #MORE THAN 1 NEIGHBOUR: CHECK INFO
                         self.write_on_file('[INFO] Tengo toda la información de mis vecinos y no soy padre: LEAF')
@@ -1236,6 +1268,9 @@ class pkt_sniffer:
                         self.node_label[0][2] = 'LEAF'
                         self.flag_init_load = True
                         self.comput_load_sharing()
+                        f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                        f.write('%d  %s  LEAF\n' %(self.node_ID,self.node_label[0][0]))
+                        f.close()
 
                 else:   #PARA NODO ROOT: Tabla de árboles con hijos
                     if self.trees_table == []:
@@ -1349,6 +1384,13 @@ class pkt_sniffer:
 
             #for i in self.datos_almacenados["abs_load_balance_list"]:
             abs_value=sum(self.datos_almacenados["abs_load_balance_list"])
+
+            if self.node_ID == ID_ROOT:   #Almacenar info paso a paso del root
+                f=open(PATH +'info_root.txt','w')
+                f.write('%d 1 %d\n' %(self.node_ID,abs_value))
+                self.write_on_file('Escrita info de root %d 1 %d\n' %(self.node_ID,abs_value))
+                f.close()
+
             #print('ABS: %d' %abs_value)
             #print('Value: %d' %value)
             #print(len(self.sons_info))
@@ -1390,6 +1432,9 @@ class pkt_sniffer:
                         #now = datetime.datetime.now()
                         #print ("Fin envio paquete de carga : ")
                         #print (now.strftime("%Y-%m-%d %H:%M:%S"))
+                        f=open(PATH +'etiq_sta%d.txt' % self.node_ID,'w')
+                        f.write('%d  %s  PARENT\n' %(self.node_ID,self.node_label[0][0]))
+                        f.close()
                     else:
                         #self.write_computing_info('ROOT',power, value)
                         self.write_on_file('[INFO] --- BALANCE DE CARGA HA CONVERGIDO ---')
@@ -1409,6 +1454,11 @@ class pkt_sniffer:
                         now = datetime.datetime.now()
                         self.write_on_file('[INFO] Escrito en el fichero')
                         self.write_on_file(now.strftime("%Y-%m-%d %H:%M:%S.%f"))
+
+                        f=open(PATH +'info_root.txt','w')
+                        f.write('%d 1 %d\n' %(self.node_ID,sum(self.datos_almacenados["abs_load_balance_list"])))
+                        self.write_on_file('Escrita info de root %d 1 %d\n' %(self.node_ID,sum(self.datos_almacenados["abs_load_balance_list"])))
+                        f.close()
                         #sys.exit()
                         #os.system('cat ./Logs/linea_sta* >> ./Logs/info_it_%d.txt' % (self.iteration-1))
                         #os.system('rm ./Logs/linea_sta*')
@@ -1441,9 +1491,18 @@ class pkt_sniffer:
             readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs, TIME_OUT/1000)
 
             for interface_readable in readable:
+
+                    ###### PROBABILIDAD DE PÉRDIDAS ######
+                    a=random.uniform(0, 1)
+                    if a < PROB_LOSS:
+                        pkt, sa_ll = interface_readable.recvfrom(MTU)  #Se lee pkt a descartar
+                        pkt=None #Se descarta el pkt
+                        break
+                    #####################################
+
                     pkt, sa_ll = interface_readable.recvfrom(MTU)
                     if len(pkt) <= 0:
-                            break
+                        break
                     #print(pkt)
                     data = struct.unpack("!2B1B", pkt[12:15])   #Comprobación OPTION
                     option = int(data[2])
