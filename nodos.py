@@ -19,7 +19,6 @@ TIME_HELLO = 3 #segundos
 TIME_ACTIVE_HELLO = 9 #segundos
 TIME_INIT_PROPAGATION = 10
 TIME_DEDENNE = 7 #segundos
-#TIME_ACTIVE_LABEL = 12 #segundos
 MAX_DEDENNE_LABELS = 1 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
 FLAG_LABELS_INFO = True
@@ -27,21 +26,15 @@ DIGITOS_PREFIJO = 2
 FLAG_PREFIJO = True
 MAC_DST = 'FF:FF:FF:FF:FF:FF'
 FLAG_TOPO_FICHERO = True
-#ID_ROOT = 1
 FLAG_FILE = False
 PATH = '/home/arppath/TFM/Logs/'
-#TIME_INIT_LOAD = 30
-#TIME_WAIT_ACK = 2
+TIME_WAIT_ACK = 1.5
 #FICHERO_TOPO = '/home/arppath/TFM/Topologias/Pruebas-protocolo/Leizpiz/60/Leizpiz_60_7'
 #FICHERO_TOPO = '/home/arppath/TFM/Topologias/4_nodos.txt'
 FICHERO_TOPO = sys.argv[1]
 FLAG_10_ITERACION = False
 CRITERIO_ETIQUETAS = int(sys.argv[2]) #0-> 1º en llegar / 1-> Etiqueta más corta
 PROB_LOSS = float(sys.argv[3]) #0-> 1º en llegar / 1-> Etiqueta más corta
-
-#PROB_LOSS = 0.01 #1%
-#PROB_LOSS = 0.02 #2%
-#PROB_LOSS = 0.005 #0.5%
 
 ###############################################################################################################################################################################################
 def handler(signum, frame):  #Kill all threads
@@ -89,6 +82,7 @@ class pkt_sniffer:
         self.escrito_fichero=0
         self.primero=0
         self.flag_cambio=False
+        self.flag_hijo_no_reconocido=False
 
 ###############################################################################################################################################################################################
     def get_node_ID(self):
@@ -356,11 +350,11 @@ class pkt_sniffer:
             #self.write_on_file('[INFO] Paquete de carga generado y puesto en cola')
 
             #self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))  #Hilo de espera de 1s para recepción de ACK
-            #if not self.timer_ACK:
-                #self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))
-                #self.timer_ACK.daemon = True
-                #self.timer_ACK.start()
-                #self.write_on_file('[INFO] Iniciado timer de ACK')
+            if not self.timer_ACK:
+                self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))
+                self.timer_ACK.daemon = True
+                self.timer_ACK.start()
+                self.write_on_file('[INFO] Iniciado timer de ACK')
 
         if option == 4:
             pkt = cabecera
@@ -372,17 +366,17 @@ class pkt_sniffer:
             #self.write_on_file('[INFO] ACK en cola de salida hacia MAC %s' % src)
 
 ###############################################################################################################################################################################################
-    #def wait_ACK(self, pkt):
+    def wait_ACK(self, pkt):
         #while(1):
-        #time.sleep(TIME_WAIT_ACK)
-        #if not self.flag_ACK:
-            #self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
-            #self.send_pkt(pkt)
+        time.sleep(TIME_WAIT_ACK)
+        if not self.flag_ACK:
+            self.write_on_file('[INFO] No se ha recibido ACK: REENVÍO PAQUETE DE CARGA')
+            self.send_pkt(pkt)
             ########################
             #SIN REENVIO POR AHORA
             #self.pkt_creation(3)   #SEND LOAD FRAME
             ########################
-            #self.datos_almacenados["retries"] += 1
+            self.datos_almacenados["retries"] += 1
             #sys.exit()
             #break
 
@@ -392,8 +386,8 @@ class pkt_sniffer:
             f=open(self.log_file,'a')
             f.write(str(line)+'\n')
             f.close()
-        #else:
-        #    print(str(line))
+        else:
+            print(str(line))
 
 ###############################################################################################################################################################################################
     def write_computing_info(self):
@@ -714,9 +708,10 @@ class pkt_sniffer:
             f.write('---------------------------------------------------------------------------------------------------------------\n')
             f.close()
 
-            #if self.timer_ACK:
-            #    self.timer_ACK.join()
-            #    self.timer_ACK = None
+            if self.timer_ACK:
+                self.timer_ACK.join()
+                self.timer_ACK = None
+
             self.iteration += 1
             self.t_stamp_hijo = 0
             self.abs_load_balance = 0
@@ -768,6 +763,7 @@ class pkt_sniffer:
 
         data_src = struct.unpack("!6B", pkt[6:12])
         mac_src='%s:%s:%s:%s:%s:%s' % (format(data_src[0], '02x'),format(data_src[1], '02x'),format(data_src[2], '02x'),format(data_src[3], '02x'),format(data_src[4], '02x'),format(data_src[5], '02x'))
+
         #print('mac_src %s ' %mac_src)
         id_src=0
         for neigh in self.info_neighbours:
@@ -829,7 +825,7 @@ class pkt_sniffer:
                 #print('main_labels: %s' % self.main_labels)
                 now = datetime.datetime.now()
                 self.datos_almacenados["last_ID_time"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
-                self.write_on_file(self.main_labels)
+                #self.write_on_file(self.main_labels)
 
             #data = struct.unpack("!6B", pkt[6:12])
             #mac_src = data[0:6]
@@ -1300,6 +1296,48 @@ class pkt_sniffer:
         self.pkt_creation(4,[],0,0,mac_rcv)    #ACK
         self.write_on_file('[INFO] Mandado ACK a MAC_src %s' % mac_rcv)
 
+        ###### SI SE RECIBE LOAD DE UN HIJO NO RECONOCIDO (POR PÉRDIDAS) ######
+        #print(self.trees_table[0][2])
+        #print(self.node_label[0][2])
+        flag_hijo=False
+        #Obtener ID de hijo
+        for neigh in self.info_neighbours:
+            if neigh[0] == mac_rcv:
+                id_hijo=neigh[1]
+                break
+
+        if id_hijo in self.trees_table[0][3]:
+            flag_hijo=True
+
+        if (self.trees_table[0][2] == 'UNDEFINED' and self.node_label[0][2] == 'UNDEFINED') or not flag_hijo:
+            flag_hijo=False
+            #self.write_on_file('DETECCIÓN HIJOS NO RECONOCIDOS')
+            #print('******************************************************************************')
+            #self.print_trees_table()
+            #self.print_labels()
+            #self.print_sons_table()
+
+            self.write_on_file('[INFO] He recibido carga de un hijo no reconocido')
+
+            if self.trees_table[0][2] == 'UNDEFINED' and self.node_label[0][2] == 'UNDEFINED':
+                self.write_on_file('[INFO] Cambio de estado a PADRE')
+                self.trees_table[0][2] = 'PARENT'
+                self.node_label[0][2] = 'PARENT'
+                self.datos_almacenados["type"] = 2 #NODO PADRE
+
+            self.write_on_file('[INFO] Nuevo hijo reconocido con ID %d' %id_hijo)
+            self.trees_table[0][3].append(id_hijo)
+            self.sons_info.append([id_hijo, False, 0])
+
+            #self.print_trees_table()
+            #self.print_labels()
+            self.print_sons_table()
+            #print(len(self.sons_info))
+            #if len(self.sons_info) == 1:  #Solo hay 1 hijo y era no reconocido
+            #    self.flag_hijo_no_reconocido=True
+
+        #######################################################################
+
         ##### TIEMPO DE ULTIMO ACK #####
         now = datetime.datetime.now()
         current_time = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
@@ -1388,7 +1426,7 @@ class pkt_sniffer:
             if self.node_ID == ID_ROOT:   #Almacenar info paso a paso del root
                 f=open(PATH +'info_root.txt','w')
                 f.write('%d 1 %d\n' %(self.node_ID,abs_value))
-                self.write_on_file('Escrita info de root %d 1 %d\n' %(self.node_ID,abs_value))
+                #self.write_on_file('Escrita info de root %d 1 %d\n' %(self.node_ID,abs_value))
                 f.close()
 
             #print('ABS: %d' %abs_value)
@@ -1399,7 +1437,9 @@ class pkt_sniffer:
                 #self.computational_load += value
                 #print(value)
                 #print(self.value_ant)
-                if (self.long_ant < len(self.sons_info) or self.value_ant != value) or self.flag_cambio:    #Para solo enviar si hay cambio de información (En nº vecinos o valor de carga): No constantemente
+                if (self.long_ant < len(self.sons_info) or self.value_ant != value) or self.flag_cambio:    #Para solo enviar si hay cambio de información (En nº vecinos o valor de carga o hijo no reconocido): No constantemente
+                    #self.flag_hijo_no_reconocido=False
+                    #print('Entro')
                     self.flag_cambio=False
                     self.long_ant = len(self.sons_info)
                     self.value_ant = value
@@ -1457,7 +1497,7 @@ class pkt_sniffer:
 
                         f=open(PATH +'info_root.txt','w')
                         f.write('%d 1 %d\n' %(self.node_ID,sum(self.datos_almacenados["abs_load_balance_list"])))
-                        self.write_on_file('Escrita info de root %d 1 %d\n' %(self.node_ID,sum(self.datos_almacenados["abs_load_balance_list"])))
+                        #self.write_on_file('Escrita info de root %d 1 %d\n' %(self.node_ID,sum(self.datos_almacenados["abs_load_balance_list"])))
                         f.close()
                         #sys.exit()
                         #os.system('cat ./Logs/linea_sta* >> ./Logs/info_it_%d.txt' % (self.iteration-1))
@@ -1535,13 +1575,13 @@ class pkt_sniffer:
                             if mac_rcv == self.node_label[self.tree_index][4]:   #Recibido ACK de mi PADRE
                                 self.flag_ACK = True
                                 self.write_on_file('[INFO] ACK recibido del nodo PADRE con MAC %s' % mac_rcv)
-                                #if self.timer_ACK:
-                                #    self.timer_ACK.join()
-                                #    self.timer_ACK = None
+                                if self.timer_ACK:
+                                    self.timer_ACK.join()
+                                    self.timer_ACK = None
                                 now = datetime.datetime.now()
                                 self.datos_almacenados["t_ACK_parent"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us  #en us
                                 #self.write_on_file('ACK %d | Load %d | diff %d' % (self.datos_almacenados["t_ACK_parent"],self.datos_almacenados["t_stamp_hijo"], self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]))
-                                #self.datos_almacenados["load_time"]= round(self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"] - TIME_WAIT_ACK*1000000) #Restar tiempo wait ACK (1º intento)
+                                self.datos_almacenados["load_time"]= round(self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"] - TIME_WAIT_ACK*1000000) #Restar tiempo wait ACK (1º intento)
                                 self.datos_almacenados["load_time"]= round(self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]) #Restar tiempo wait ACK (1º intento)
                                 self.write_computing_info()
                                 now = datetime.datetime.now()
