@@ -23,7 +23,7 @@ MAX_DEDENNE_LABELS = 1 #etiquetas dedenne max por nodo
 FLAG_HELLO_INFO = True
 FLAG_LABELS_INFO = True
 DIGITOS_PREFIJO = 2
-FLAG_PREFIJO = False
+FLAG_PREFIJO = True
 MAC_DST = 'FF:FF:FF:FF:FF:FF'
 FLAG_TOPO_FICHERO = True
 FLAG_FILE = False
@@ -360,11 +360,11 @@ class pkt_sniffer:
             self.datos_almacenados["n_total_LOAD_pkt"] +=1
             #self.write_on_file('[INFO] Paquete de carga generado y puesto en cola')
 
-            #if not self.timer_ACK:
-            #    self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))
-            #    self.timer_ACK.daemon = True
-            #    self.timer_ACK.start()
-            #    self.write_on_file('[INFO] Iniciado timer de ACK')
+            if not self.timer_ACK:
+                self.timer_ACK=threading.Thread(target=self.wait_ACK, args=(pkt,))
+                self.timer_ACK.daemon = True
+                self.timer_ACK.start()
+                self.write_on_file('[INFO] Iniciado timer de ACK')
 
         if option == 4:
             pkt = cabecera
@@ -468,9 +468,9 @@ class pkt_sniffer:
         self.datos_almacenados["t_stamp_hijo"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us
         self.datos_almacenados["abs_load_balance"] = abs(self.computational_load)
 
-        #if self.timer_ACK:
-        #    self.timer_ACK.join()
-        #    self.timer_ACK = None
+        if self.timer_ACK:
+            self.timer_ACK.join()
+            self.timer_ACK = None
 
         self.pkt_creation(3)
 
@@ -599,9 +599,9 @@ class pkt_sniffer:
             f.write('--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n')
             f.close()
 
-            #if self.timer_ACK:
-            #    self.timer_ACK.join()
-            #    self.timer_ACK = None
+            if self.timer_ACK:
+                self.timer_ACK.join()
+                self.timer_ACK = None
 
             self.iteration += 1
             self.t_stamp_hijo = 0
@@ -732,9 +732,9 @@ class pkt_sniffer:
                                     self.long_ant = len(self.sons_info)
                                     self.value_ant = value
 
-                                    #if self.timer_ACK:
-                                    #    self.timer_ACK.join()
-                                    #    self.timer_ACK = None
+                                    if self.timer_ACK:
+                                        self.timer_ACK.join()
+                                        self.timer_ACK = None
 
                                     self.write_on_file('[INFO] Por cambio de mis vecinos, vuelvo a mandar carga')
                                     self.write_on_file('[INFO] Valor de carga computacional %d' % (self.computational_load))
@@ -1417,9 +1417,9 @@ class pkt_sniffer:
                         #self.write_on_file('[INFO] Actualizado valor de carga absoluto %d' % (abs(self.computational_load)+abs_value))
                         self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])+abs(self.computational_load)
 
-                        #if self.timer_ACK:
-                        #    self.timer_ACK.join()
-                        #    self.timer_ACK = None
+                        if self.timer_ACK:
+                            self.timer_ACK.join()
+                            self.timer_ACK = None
 
                         self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
 
@@ -1543,9 +1543,9 @@ class pkt_sniffer:
                             if mac_rcv == self.node_label[self.tree_index][4]:   #Recibido ACK de mi PADRE
                                 self.flag_ACK = True
                                 self.write_on_file('[INFO] ACK recibido del nodo PADRE con MAC %s' % mac_rcv)
-                                #if self.timer_ACK:
-                                #    self.timer_ACK.join()
-                                #    self.timer_ACK = None
+                                if self.timer_ACK:
+                                    self.timer_ACK.join()
+                                    self.timer_ACK = None
                                 now = datetime.datetime.now()
                                 self.datos_almacenados["t_ACK_parent"] = round(datetime.datetime.timestamp(now) * 1000000) #timestamp en us  #en us
                                 #self.write_on_file('ACK %d | Load %d | diff %d' % (self.datos_almacenados["t_ACK_parent"],self.datos_almacenados["t_stamp_hijo"], self.datos_almacenados["t_ACK_parent"] - self.datos_almacenados["t_stamp_hijo"]))
@@ -1616,9 +1616,9 @@ class pkt_sniffer:
                             self.write_on_file('[INFO] Valor de carga computacional %d' % (self.computational_load))
                             self.datos_almacenados["abs_load_balance"] = sum(self.datos_almacenados["abs_load_balance_list"])+abs(self.computational_load)
 
-                            #if self.timer_ACK:
-                            #    self.timer_ACK.join()
-                            #    self.timer_ACK = None
+                            if self.timer_ACK:
+                                self.timer_ACK.join()
+                                self.timer_ACK = None
 
                             self.pkt_creation(3,[],0,value)   #SEND LOAD FRAME
 
