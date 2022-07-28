@@ -63,7 +63,7 @@ def topology(args):
 
     #os.system('sudo rm ' + PATH_LOGS + '*')
     for i in range(len(sta)):
-        sta[i].cmd('python3 /home/arppath/TFM/nodos.py %s %d %f &' % (sys.argv[1], int(sys.argv[2]), float(sys.argv[3])))
+        sta[i].cmd('python3 /home/arppath/TFM/nodos_reint.py %s %d %f &' % (sys.argv[1], int(sys.argv[2]), float(sys.argv[3])))
         #else:
         #    sta[i].cmd('python3 nodos.py |& tee -a ./Logs/log_sta%d.txt &' % (i+1))
 
@@ -78,14 +78,14 @@ def topology(args):
     #CLI(net)
     net.start()
 
+    #for i in range(len(sta)):
+    #   sta[i].stop()
     files = os.listdir(PATH_LOGS)
     while not 'info_it_0.txt' in files:# and ('linea_sta1.txt' in files)):
         files = os.listdir(PATH_LOGS)
     time.sleep(25)
     os.system('touch /home/arppath/TFM/Logs/info_it_1.txt')
 
-    #for i in range(len(sta)):
-    #   sta[i].stop()
     #files = os.listdir(PATH_LOGS)
     #print( len(files))
     #while ('info_it_1.txt' not in files):# and ('linea_sta1.txt' in files)):
