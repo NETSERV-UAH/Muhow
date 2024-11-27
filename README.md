@@ -8,7 +8,7 @@ Alvarez-Horcajo, J., Martinez-Yelmo, I., Rojas, E., Carral, J. A., & Noci-Luna, 
 
 ## Instrucciones de uso
 
-## Instalación de Mininet
+### Instalación de Mininet
 
 Descargar el código fuente de mininet:
 
@@ -26,7 +26,7 @@ Para instalar mininet usar le siguiente comando:
     
     mininet/util/install.sh [options]
 
-## Instalación de Mininet-wifi
+### Instalación de Mininet-wifi
 
 Copie el repositorio:
 
